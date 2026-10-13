@@ -10,6 +10,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN
+from .favourites import venue_key
 
 
 def _event_start(event):
@@ -391,6 +392,50 @@ class UKGAVenueWebsiteSensor(CoordinatorEntity, SensorEntity):
             "sauna": venue.get("name"),
             "directory_url": venue.get("url"),
             "match_status": venue.get("website_match_status") or "Not found",
+        }
+
+
+class UKGAFavouritesSensor(CoordinatorEntity, SensorEntity):
+    """List saved favourite venues."""
+
+    _attr_has_entity_name = False
+    _attr_name = "UKGA favourites"
+    _attr_icon = "mdi:heart-multiple"
+
+    def __init__(self, coordinator, entry_id, favourite_store):
+        super().__init__(coordinator)
+        self._favourite_store = favourite_store
+        self._attr_unique_id = f"{entry_id}_favourites"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name="UKGA Sauna Hub",
+            manufacturer="UK Gay Saunas & Events",
+            model="Sauna directory and events hub",
+        )
+
+    @property
+    def _favourite_venues(self):
+        venues = (self.coordinator.data or {}).get("venues", [])
+        return [
+            venue for venue in venues
+            if self._favourite_store.is_favourite(venue)
+        ]
+
+    @property
+    def native_value(self):
+        return len(self._favourite_venues)
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "favourites": [
+                {
+                    "name": venue.get("name"),
+                    "directory_url": venue.get("url"),
+                    "official_website": venue.get("official_website"),
+                }
+                for venue in self._favourite_venues
+            ],
         }
 
 
