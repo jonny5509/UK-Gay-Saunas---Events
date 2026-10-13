@@ -525,6 +525,53 @@ async def async_collect(session, sources):
     except Exception as err:
         errors.append(f"{covent_garden_url}: {err}")
 
+    # Explicitly include The Locker Room London listing.
+    locker_room_url = "https://gaysaunas.co.uk/uk/england/london/the-locker-room-gay-sauna-london/"
+    locker_room_name = "The Locker Room London"
+    locker_room_key = "thelockerroomlondon"
+    existing_locker_key = next((key for key, venue in venues_by_key.items()
+                                if "lockerroom" in re.sub(r"[^a-z0-9]+", "", venue.get("name", "").lower())), None)
+    if existing_locker_key:
+        locker_room = venues_by_key.pop(existing_locker_key)
+        locker_room["name"] = locker_room_name
+        locker_room["url"] = locker_room_url
+        locker_room["source_links"] = list(dict.fromkeys([locker_room_url, *(locker_room.get("source_links") or [])]))
+        locker_room["sources"] = list(dict.fromkeys([*(locker_room.get("sources") or []), locker_room_url]))
+        locker_room["source_directory"] = locker_room_url
+        venues_by_key[locker_room_key] = locker_room
+    else:
+        venues_by_key[locker_room_key] = {
+            "name": locker_room_name,
+            "address": "6 Cleaver Street, London, SE11 4DP",
+            "url": locker_room_url,
+            "description": "The Locker Room gay sauna in Kennington, London.",
+            "source": "gaysaunas.co.uk",
+            "sources": [locker_room_url],
+            "source_links": [locker_room_url],
+            "official_website": "https://lockerroomsauna.uk/",
+            "source_directory": locker_room_url,
+        }
+    try:
+        html = await _get(session, locker_room_url)
+        parser = PageParser(locker_room_url)
+        parser.feed(html)
+        found_events, found_places = _extract_structured(parser, locker_room_url)
+        for place in found_places:
+            if "lockerroom" in re.sub(r"[^a-z0-9]+", "", place.get("name", "").lower()):
+                venues_by_key[locker_room_key]["address"] = place.get("address") or venues_by_key[locker_room_key].get("address", "")
+                venues_by_key[locker_room_key]["description"] = place.get("description") or venues_by_key[locker_room_key].get("description", "")
+        for event in found_events:
+            if not event.get("start"):
+                continue
+            event["location"] = event.get("location") or locker_room_name
+            event["source_directory"] = locker_room_url
+            events_by_key[(event.get("id") or event["summary"], event["start"])] = event
+        for event in _recurring_events(parser, locker_room_url, locker_room_name):
+            event["source_directory"] = locker_room_url
+            events_by_key[(event["id"], event["start"])] = event
+    except Exception as err:
+        errors.append(f"{locker_room_url}: {err}")
+
     # Ensure Number 52 is represented even if a directory omits it or changes its links.
     # The official website is also scraped directly so published event information can be picked up.
     number52_url = "https://www.number52sauna.co.uk/"
