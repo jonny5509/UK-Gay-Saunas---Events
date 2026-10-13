@@ -347,9 +347,11 @@ async def async_collect(session, sources):
                     for event in found_events:
                         if not event.get("start"):
                             continue
+                        event["venue"] = venue_label
                         event["source_directory"] = source
                         events_by_key[(event.get("id") or event["summary"], event["start"])] = event
                     for event in _recurring_events(parser, url, event_venue):
+                        event["venue"] = venue_label
                         event["source_directory"] = source
                         events_by_key[(event["id"], event["start"])] = event
                     # Save the resolved page heading/title, not the directory card text.
@@ -387,6 +389,8 @@ async def async_collect(session, sources):
                 "start": event.get("start"),
                 "end": event.get("end"),
                 "location": event.get("location"),
+                "venue": event.get("venue"),
+                "description": event.get("description"),
                 "url": event.get("url"),
                 "source_directory": event.get("source_directory"),
                 "recurring": event.get("recurring", False),
