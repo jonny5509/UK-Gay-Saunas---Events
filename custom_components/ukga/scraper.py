@@ -142,6 +142,29 @@ def _date(value):
         return None
 
 
+
+def _extract_private_rooms(parser):
+    """Return Yes/No only for explicit private-room claims; otherwise unknown."""
+    text = clean(" ".join(parser.text))
+    claims = []
+    for match in re.finditer(r"\bprivate\s+(?:rooms?|cabins?)\b", text, re.I):
+        context = text[max(0, match.start() - 100):min(len(text), match.end() + 100)].lower()
+        negative = re.search(
+            r"\b(?:no|not|never|without|unavailable|unavailable|doesn['’]?t\s+(?:have|offer|provide)|do\s+not\s+(?:have|offer|provide)|aren['’]?t\s+available)\b",
+            context,
+        )
+        positive = re.search(
+            r"\b(?:available|offer(?:s|ed)?|provid(?:e|es|ed)|have|has|book(?:able)?|rent(?:able)?|hire|yes)\b",
+            context,
+        )
+        if negative:
+            claims.append("No")
+        elif positive:
+            claims.append("Yes")
+    if not claims or len(set(claims)) > 1:
+        return None
+    return claims[0]
+
 def _extract_pricing(parser):
     """Extract a concise price statement only when the page explicitly labels pricing."""
     text = clean(" ".join(parser.text))
@@ -503,6 +526,9 @@ async def async_collect(session, sources):
                         pricing = _extract_pricing(parser)
                         if pricing:
                             venues_by_key[key]["pricing"] = pricing
+                        private_rooms = _extract_private_rooms(parser)
+                        if private_rooms:
+                            venues_by_key[key]["private_rooms"] = private_rooms
                         source_venue_keys.add(key)
                     # Do not recursively enqueue links found on venue pages. That caused
                     # event articles, tag pages, and other nested pages to be mistaken for
