@@ -158,7 +158,6 @@ def _recurring_events(parser, page_url, venue_name):
         day = next((d for d in DAY_NAMES if re.search(rf"\b{d}\b", low)), None)
         if not day:
             continue
-        # Some sites place title, weekday, and hours in separate HTML text nodes.
         title = ""
         for previous in reversed(chunks[max(0, i - 3):i]):
             candidate = clean(previous)
@@ -169,7 +168,6 @@ def _recurring_events(parser, page_url, venue_name):
                     and not re.fullmatch(r"[\d:–—\- ]+", candidate)):
                 title = candidate
                 break
-        # If the schedule itself is one text node, its prefix often contains the event name.
         if not title:
             title = re.split(r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", chunk, flags=re.I)[0].strip(" ·-–:")
         if not title or len(title) < 3:
@@ -187,7 +185,6 @@ def _recurring_events(parser, page_url, venue_name):
         ordinal_text = " ".join(chunks[max(0, i - 3):min(len(chunks), i + 4)])
         ordinal_match = ORDINAL_RE.search(ordinal_text)
         ordinal = ordinal_match.group(1).lower() if ordinal_match else None
-        # A schedule marked "first/second/third/last [weekday]" is monthly.
         monthly = bool(ordinal)
         dates = []
         if monthly:
@@ -246,7 +243,6 @@ def _candidate_links(parser, source_url):
             continue
         if any(word in name.lower() for word in SKIP):
             continue
-        # Prioritise links that look like venue pages or official websites.
         label = name.lower()
         priority = 0 if any(x in label for x in ("official website", "visit website", "website", "web site")) else (
             1 if host != source_host else 2)
@@ -270,7 +266,6 @@ async def async_collect(session, sources):
                           "official": item["priority"] == 0 or item["host"] != urlparse(source).netloc.lower().removeprefix("www.")}
                          for item in initial)
             seen_pages, pages_done = set(), 0
-            # Crawl directory venue pages, then follow official links discovered on them.
             while queue and pages_done < MAX_PAGES_PER_SOURCE * 3:
                 candidate = queue.pop(0)
                 url = candidate["url"].split("#", 1)[0]
@@ -298,7 +293,6 @@ async def async_collect(session, sources):
                                     current["address"] = place["address"]
                                 if place["url"] not in current["source_links"]:
                                     current["source_links"].append(place["url"])
-                    # Directory pages commonly link to official websites with weak or generic labels.
                     base_host = urlparse(url).netloc.lower().removeprefix("www.")
                     for link in parser.links:
                         link_url = link["url"].split("#", 1)[0]
@@ -310,13 +304,11 @@ async def async_collect(session, sources):
                         if any(word in (label + " " + link_url).lower() for word in SKIP):
                             continue
                         if candidate.get("official") or any(word in label.lower() for word in ("official website", "visit website", "website", "web site")):
-                            # Add official site to the venue record matching this directory label where possible.
                             key = re.sub(r"[^a-z0-9]+", "", venue_label.lower())
                             if key in venues_by_key and not venues_by_key[key].get("official_website"):
                                 venues_by_key[key]["official_website"] = link_url
                             if len(queue) < MAX_PAGES_PER_SOURCE * 4:
                                 queue.append({"url": link_url, "name": venue_label, "directory": source, "official": True})
-                    # Text-based event schedules supplement explicit Schema.org event markup.
                     event_venue = next((p["name"] for p in found_places if p.get("name")), venue_label)
                     for event in found_events:
                         if not event.get("start"):
@@ -334,7 +326,6 @@ async def async_collect(session, sources):
                             "source": source_host, "sources": [source], "source_links": [url],
                             "official_website": url if candidate.get("official") else "",
                         }
-                    # When on a directory venue page, queue likely official links not already visited.
                     if not candidate.get("official"):
                         for link in _candidate_links(parser, url):
                             if link["host"] != base_host and (
@@ -347,6 +338,43 @@ async def async_collect(session, sources):
                     continue
         except Exception as err:
             errors.append(f"{source}: {err}")
+
+    # Ensure Number 52 is represented even if a directory omits it or changes its links.
+    # The official website is also scraped directly so published event information can be picked up.
+    number52_url = "https://www.number52sauna.co.uk/"
+    number52_key = "number52sauna"
+    matching_key = next((key for key, venue in venues_by_key.items()
+                         if "number52" in re.sub(r"[^a-z0-9]+", "", venue.get("name", "").lower())), None)
+    if matching_key is None:
+        venue = {
+            "name": "Number 52 Sauna",
+            "address": "52 Scotswood Road, Newcastle upon Tyne, NE4 7JB",
+            "url": number52_url,
+            "description": "Sauna in Newcastle upon Tyne.",
+            "source": "number52sauna.co.uk",
+            "sources": [number52_url],
+            "source_links": [number52_url],
+            "official_website": number52_url,
+            "source_directory": number52_url,
+        }
+        venues_by_key[number52_key] = venue
+    try:
+        html = await _get(session, number52_url)
+        parser = PageParser(number52_url)
+        parser.feed(html)
+        found_events, _ = _extract_structured(parser, number52_url)
+        for event in found_events:
+            if not event.get("start"):
+                continue
+            event["location"] = event.get("location") or "Number 52 Sauna, Newcastle upon Tyne"
+            event["source_directory"] = number52_url
+            events_by_key[(event.get("id") or event["summary"], event["start"])] = event
+        for event in _recurring_events(parser, number52_url, "Number 52 Sauna"):
+            event["source_directory"] = number52_url
+            events_by_key[(event["id"], event["start"])] = event
+    except Exception as err:
+        errors.append(f"{number52_url}: {err}")
+
     if not venues_by_key and not events_by_key and errors:
         raise RuntimeError("; ".join(errors))
     return {
