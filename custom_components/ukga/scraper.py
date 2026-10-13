@@ -1,13 +1,7 @@
-"""Best-effort directory and Schema.org Event scraper for the two configured sources.
-
-The directory pages are not guaranteed to expose structured event data. This module
-collects same-site venue links, then looks for Schema.org Event and address metadata
-on a limited number of linked pages. Source HTML changes may require adjustments.
-"""
+"""Scrape sauna directories, linked venue pages, and official venue websites."""
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime
+from datetime import date, datetime, time, timedelta, timezone
 from html.parser import HTMLParser
 import json
 import re
@@ -15,8 +9,15 @@ from urllib.parse import urljoin, urlparse
 
 from .const import MAX_PAGES_PER_SOURCE
 
-HEADERS = {"User-Agent": "Home Assistant UKGA integration/0.1 (personal use)"}
-SKIP = ("privacy", "cookies", "contact", "about us", "terms", "login", "register", "facebook", "instagram")
+HEADERS = {"User-Agent": "Home Assistant UKGA integration/0.2 (personal use)"}
+SKIP = ("privacy", "cookies", "contact", "about us", "terms", "login", "register",
+        "facebook", "instagram", "tiktok", "youtube", "twitter", "whatsapp")
+DAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+DAY_NUM = {name: i for i, name in enumerate(DAY_NAMES)}
+TIME_RE = re.compile(r"(?P<start>(?:[01]?\d|2[0-3])[:.][0-5]\d)\s*(?:-|–|—|to)\s*(?P<end>(?:[01]?\d|2[0-3])[:.][0-5]\d)", re.I)
+ORDINAL_RE = re.compile(r"\b(first|1st|second|2nd|third|3rd|fourth|4th|last)\b", re.I)
+EVENT_WORDS = ("event", "night", "party", "session", "day", "special", "foam", "bear",
+               "naked", "fetish", "discount", "social", "themed", "workout", "club")
 
 def clean(value):
     return re.sub(r"\s+", " ", str(value or "")).strip()
@@ -79,13 +80,9 @@ class PageParser(HTMLParser):
 def _iter_jsonld(value):
     if isinstance(value, dict):
         yield value
-        graph = value.get("@graph")
-        if graph is not None:
-            yield from _iter_jsonld(graph)
         for key, item in value.items():
-            if key not in ("@graph",):
-                if isinstance(item, (dict, list)):
-                    yield from _iter_jsonld(item)
+            if isinstance(item, (dict, list)):
+                yield from _iter_jsonld(item)
     elif isinstance(value, list):
         for item in value:
             yield from _iter_jsonld(item)
@@ -99,9 +96,7 @@ def _address(obj):
     if isinstance(addr, dict):
         return clean(", ".join(str(addr.get(k, "")) for k in
             ("streetAddress", "addressLocality", "addressRegion", "postalCode", "addressCountry") if addr.get(k)))
-    if isinstance(addr, str):
-        return clean(addr)
-    return ""
+    return clean(addr) if isinstance(addr, str) else ""
 
 def _date(value):
     if not value:
@@ -109,7 +104,6 @@ def _date(value):
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         if parsed.tzinfo is None:
-            from datetime import timezone
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.isoformat()
     except (ValueError, TypeError):
@@ -124,7 +118,7 @@ def _extract_structured(parser, page_url):
             continue
         for obj in _iter_jsonld(data):
             types = _types(obj)
-            if "event" in types or any(t.endswith("event") for t in types):
+            if any(t == "event" or t.endswith("event") for t in types):
                 start = _date(obj.get("startDate"))
                 end = _date(obj.get("endDate")) or start
                 loc = obj.get("location", {})
@@ -132,9 +126,7 @@ def _extract_structured(parser, page_url):
                 loc_addr = _address(loc) if isinstance(loc, dict) else ""
                 events.append({
                     "id": clean(obj.get("@id") or obj.get("url") or f"{page_url}#{clean(obj.get('name'))}"),
-                    "summary": clean(obj.get("name") or "Sauna event"),
-                    "start": start,
-                    "end": end,
+                    "summary": clean(obj.get("name") or "Sauna event"), "start": start, "end": end,
                     "description": clean(obj.get("description", "")),
                     "location": loc_addr or clean(loc_name),
                     "url": urljoin(page_url, str(obj.get("url") or page_url)),
@@ -142,13 +134,100 @@ def _extract_structured(parser, page_url):
             if any(t in types for t in ("localbusiness", "healthandbeautybusiness", "place", "sportsactivitylocation")):
                 name = clean(obj.get("name"))
                 if name:
-                    places.append({
-                        "name": name,
-                        "address": _address(obj),
+                    places.append({"name": name, "address": _address(obj),
                         "url": urljoin(page_url, str(obj.get("url") or page_url)),
-                        "description": clean(obj.get("description", "")),
-                    })
+                        "description": clean(obj.get("description", ""))})
     return events, places
+
+def _parse_clock(value):
+    if not value:
+        return None
+    value = value.replace(".", ":")
+    try:
+        return datetime.strptime(value, "%H:%M").time()
+    except ValueError:
+        return None
+
+def _recurring_events(parser, page_url, venue_name):
+    """Infer future calendar occurrences only from explicit published weekday schedules."""
+    found = {}
+    chunks = parser.text
+    today = date.today()
+    for i, chunk in enumerate(chunks):
+        low = chunk.lower()
+        day = next((d for d in DAY_NAMES if re.search(rf"\b{d}\b", low)), None)
+        if not day:
+            continue
+        # Some sites place title, weekday, and hours in separate HTML text nodes.
+        title = ""
+        for previous in reversed(chunks[max(0, i - 3):i]):
+            candidate = clean(previous)
+            candidate_low = candidate.lower()
+            if (len(candidate) >= 3 and len(candidate) <= 90
+                    and not any(x in candidate_low for x in ("what's on", "events & themed", "opening hours", "when to visit"))
+                    and not any(re.search(rf"\b{x}\b", candidate_low) for x in DAY_NAMES)
+                    and not re.fullmatch(r"[\d:–—\- ]+", candidate)):
+                title = candidate
+                break
+        # If the schedule itself is one text node, its prefix often contains the event name.
+        if not title:
+            title = re.split(r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", chunk, flags=re.I)[0].strip(" ·-–:")
+        if not title or len(title) < 3:
+            continue
+        if not any(word in title.lower() for word in EVENT_WORDS):
+            continue
+        context = " ".join(chunks[i:min(len(chunks), i + 4)])
+        times = TIME_RE.search(context)
+        start_clock = _parse_clock(times.group("start")) if times else time(12, 0)
+        end_clock = _parse_clock(times.group("end")) if times else start_clock
+        if not start_clock:
+            start_clock = time(12, 0)
+        if not end_clock:
+            end_clock = start_clock
+        ordinal_text = " ".join(chunks[max(0, i - 3):min(len(chunks), i + 4)])
+        ordinal_match = ORDINAL_RE.search(ordinal_text)
+        ordinal = ordinal_match.group(1).lower() if ordinal_match else None
+        # A schedule marked "first/second/third/last [weekday]" is monthly.
+        monthly = bool(ordinal)
+        dates = []
+        if monthly:
+            for month_offset in range(0, 7):
+                month_index = today.month - 1 + month_offset
+                year = today.year + month_index // 12
+                month = month_index % 12 + 1
+                first = date(year, month, 1)
+                delta = (DAY_NUM[day] - first.weekday()) % 7
+                first_occurrence = first + timedelta(days=delta)
+                if ordinal in ("first", "1st"):
+                    occurrence = first_occurrence
+                elif ordinal in ("second", "2nd"):
+                    occurrence = first_occurrence + timedelta(days=7)
+                elif ordinal in ("third", "3rd"):
+                    occurrence = first_occurrence + timedelta(days=14)
+                elif ordinal in ("fourth", "4th"):
+                    occurrence = first_occurrence + timedelta(days=21)
+                else:
+                    next_month = date(year + (month == 12), month % 12 + 1, 1)
+                    occurrence = next_month - timedelta(days=1)
+                    occurrence -= timedelta(days=(occurrence.weekday() - DAY_NUM[day]) % 7)
+                if occurrence >= today:
+                    dates.append(occurrence)
+        else:
+            delta = (DAY_NUM[day] - today.weekday()) % 7
+            first_day = today + timedelta(days=delta)
+            dates = [first_day + timedelta(days=7 * n) for n in range(13)]
+        for occurrence in dates:
+            start_dt = datetime.combine(occurrence, start_clock).astimezone()
+            end_date = occurrence + timedelta(days=1) if end_clock < start_clock else occurrence
+            end_dt = datetime.combine(end_date, end_clock).astimezone()
+            event = {
+                "id": f"{page_url}#{re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')}-{occurrence.isoformat()}",
+                "summary": clean(title), "start": start_dt.isoformat(), "end": end_dt.isoformat(),
+                "description": f"Published recurring schedule. Please confirm details with the venue. Venue: {venue_name}",
+                "location": venue_name, "url": page_url, "recurring": True,
+            }
+            found[(event["summary"].lower(), event["start"])] = event
+    return list(found.values())
 
 async def _get(session, url):
     async with session.get(url, timeout=25, headers=HEADERS) as response:
@@ -157,23 +236,25 @@ async def _get(session, url):
 
 def _candidate_links(parser, source_url):
     source_host = urlparse(source_url).netloc.lower().removeprefix("www.")
-    candidates = []
-    seen = {source_url}
+    candidates, seen = [], {source_url}
     for link in parser.links:
         url = link["url"].split("#", 1)[0]
-        host = urlparse(url).netloc.lower().removeprefix("www.")
+        parsed = urlparse(url)
+        host = parsed.netloc.lower().removeprefix("www.")
         name = clean(link["name"])
-        if not url.startswith("https://") or not name or url in seen:
+        if parsed.scheme not in ("http", "https") or not host or not name or url in seen:
             continue
         if any(word in name.lower() for word in SKIP):
             continue
-        # Prefer links on the source domain; external links are only included if the
-        # visible label looks like a named venue/event, not generic footer navigation.
-        if host != source_host and len(name) < 5:
+        # Prioritise links that look like venue pages or official websites.
+        label = name.lower()
+        priority = 0 if any(x in label for x in ("official website", "visit website", "website", "web site")) else (
+            1 if host != source_host else 2)
+        if host == source_host and len(name) < 3:
             continue
         seen.add(url)
-        candidates.append({"url": url, "name": name})
-    return candidates[:MAX_PAGES_PER_SOURCE]
+        candidates.append({"url": url, "name": name, "priority": priority, "host": host})
+    return sorted(candidates, key=lambda x: x["priority"])[:MAX_PAGES_PER_SOURCE]
 
 async def async_collect(session, sources):
     venues_by_key, events_by_key, errors = {}, {}, []
@@ -182,48 +263,87 @@ async def async_collect(session, sources):
             html = await _get(session, source)
             listing_parser = PageParser(source)
             listing_parser.feed(html)
-            candidates = _candidate_links(listing_parser, source)
-            # Include source directory itself for resilience.
-            candidates.insert(0, {"url": source, "name": listing_parser.title or urlparse(source).netloc})
-            for candidate in candidates:
+            initial = _candidate_links(listing_parser, source)
+            queue = [{"url": source, "name": listing_parser.title or urlparse(source).netloc,
+                      "directory": source, "official": False}]
+            queue.extend({"url": item["url"], "name": item["name"], "directory": source,
+                          "official": item["priority"] == 0 or item["host"] != urlparse(source).netloc.lower().removeprefix("www.")}
+                         for item in initial)
+            seen_pages, pages_done = set(), 0
+            # Crawl directory venue pages, then follow official links discovered on them.
+            while queue and pages_done < MAX_PAGES_PER_SOURCE * 3:
+                candidate = queue.pop(0)
+                url = candidate["url"].split("#", 1)[0]
+                if url in seen_pages:
+                    continue
+                seen_pages.add(url)
                 try:
-                    page_html = html if candidate["url"] == source else await _get(session, candidate["url"])
-                    parser = PageParser(candidate["url"])
+                    page_html = html if url == source else await _get(session, url)
+                    parser = PageParser(url)
                     parser.feed(page_html)
-                    found_events, found_places = _extract_structured(parser, candidate["url"])
+                    pages_done += 1
+                    found_events, found_places = _extract_structured(parser, url)
                     source_host = urlparse(source).netloc
+                    venue_label = candidate["name"]
                     for place in found_places:
                         place["source"] = source_host
                         place["source_directory"] = source
                         key = re.sub(r"[^a-z0-9]+", "", place["name"].lower())
                         if key:
-                            if key not in venues_by_key:
-                                venues_by_key[key] = place | {"sources": [source], "source_links": [place["url"]]}
+                            current = venues_by_key.get(key)
+                            if current is None:
+                                venues_by_key[key] = place | {"sources": [source], "source_links": [place["url"]], "official_website": ""}
                             else:
-                                current = venues_by_key[key]
                                 if not current.get("address") and place.get("address"):
                                     current["address"] = place["address"]
-                                if source not in current["sources"]:
-                                    current["sources"].append(source)
                                 if place["url"] not in current["source_links"]:
                                     current["source_links"].append(place["url"])
+                    # Directory pages commonly link to official websites with weak or generic labels.
+                    base_host = urlparse(url).netloc.lower().removeprefix("www.")
+                    for link in parser.links:
+                        link_url = link["url"].split("#", 1)[0]
+                        parsed = urlparse(link_url)
+                        host = parsed.netloc.lower().removeprefix("www.")
+                        label = clean(link["name"])
+                        if parsed.scheme not in ("http", "https") or not host or host == base_host:
+                            continue
+                        if any(word in (label + " " + link_url).lower() for word in SKIP):
+                            continue
+                        if candidate.get("official") or any(word in label.lower() for word in ("official website", "visit website", "website", "web site")):
+                            # Add official site to the venue record matching this directory label where possible.
+                            key = re.sub(r"[^a-z0-9]+", "", venue_label.lower())
+                            if key in venues_by_key and not venues_by_key[key].get("official_website"):
+                                venues_by_key[key]["official_website"] = link_url
+                            if len(queue) < MAX_PAGES_PER_SOURCE * 4:
+                                queue.append({"url": link_url, "name": venue_label, "directory": source, "official": True})
+                    # Text-based event schedules supplement explicit Schema.org event markup.
+                    event_venue = next((p["name"] for p in found_places if p.get("name")), venue_label)
                     for event in found_events:
                         if not event.get("start"):
                             continue
-                        key = (event.get("id") or event["summary"], event["start"])
                         event["source_directory"] = source
-                        events_by_key[key] = event
-                    # If a page is clearly a venue but has no JSON-LD Place, retain its link.
+                        events_by_key[(event.get("id") or event["summary"], event["start"])] = event
+                    for event in _recurring_events(parser, url, event_venue):
+                        event["source_directory"] = source
+                        events_by_key[(event["id"], event["start"])] = event
                     label = candidate["name"]
                     key = re.sub(r"[^a-z0-9]+", "", label.lower())
-                    if key and candidate["url"] != source and key not in venues_by_key:
+                    if key and url != source and key not in venues_by_key:
                         venues_by_key[key] = {
-                            "name": label, "address": "", "url": candidate["url"],
-                            "description": "", "source": source_host,
-                            "sources": [source], "source_links": [candidate["url"]],
+                            "name": label, "address": "", "url": url, "description": "",
+                            "source": source_host, "sources": [source], "source_links": [url],
+                            "official_website": url if candidate.get("official") else "",
                         }
-                except Exception:
-                    # A single blocked/removed venue page should not stop the other pages.
+                    # When on a directory venue page, queue likely official links not already visited.
+                    if not candidate.get("official"):
+                        for link in _candidate_links(parser, url):
+                            if link["host"] != base_host and (
+                                link["priority"] == 0 or any(x in link["name"].lower() for x in ("official", "website", "visit", "home"))
+                            ):
+                                queue.append({"url": link["url"], "name": venue_label, "directory": source, "official": True})
+                except Exception as err:
+                    if url == source:
+                        errors.append(f"{source}: {err}")
                     continue
         except Exception as err:
             errors.append(f"{source}: {err}")
@@ -233,5 +353,6 @@ async def async_collect(session, sources):
         "venues": sorted(venues_by_key.values(), key=lambda x: x["name"].lower()),
         "events": sorted(events_by_key.values(), key=lambda x: x["start"] or ""),
         "source_errors": errors,
+        "sources": sources,
         "last_updated": datetime.now().astimezone().isoformat(),
     }
