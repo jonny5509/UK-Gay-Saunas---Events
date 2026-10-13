@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from datetime import timedelta
 import logging
+import hashlib
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import async_get as async_get_device_registry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.components import persistent_notification
 
 from .const import DOMAIN, DEFAULT_SOURCES, SCAN_INTERVAL
 from .scraper import async_collect
@@ -31,9 +33,55 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry, data={**entry.data, "sources": sources}
         )
 
+    favourite_store = FavouriteStore(hass, entry.entry_id)
+    await favourite_store.async_load()
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id + "_favourites"] = favourite_store
+    first_update = True
+
     async def async_update_data():
+        nonlocal first_update
         try:
-            return await async_collect(session, sources)
+            data = await async_collect(session, sources)
+            from .sensor import _event_matches_venue, _event_start
+
+            events = data.get("events", [])
+            venues = data.get("venues", [])
+            now = __import__("datetime").datetime.now().astimezone()
+            for event in events:
+                start = _event_start(event)
+                if not start or start < now:
+                    continue
+                identity = "|".join(str(event.get(field) or "") for field in (
+                    "summary", "start", "end", "url", "location"
+                ))
+                event_key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+                if event_key in favourite_store.notified_events:
+                    continue
+                # On the first crawl after startup, establish a baseline instead
+                # of sending a burst of notifications for existing listings.
+                if first_update:
+                    await favourite_store.async_mark_event_notified(event_key)
+                    continue
+                for venue in venues:
+                    if not favourite_store.notifications_enabled(venue):
+                        continue
+                    if not _event_matches_venue(event, venue):
+                        continue
+                    name = venue.get("name") or "Sauna"
+                    summary = event.get("summary") or "New upcoming event"
+                    start_text = start.strftime("%a %d %b, %H:%M %Z")
+                    details = [f"**{summary}**", f"Venue: {name}", f"Starts: {start_text}"]
+                    if event.get("url"):
+                        details.append(f"[Event details]({event['url']})")
+                    persistent_notification.async_create(
+                        hass,
+                        "\n\n".join(details),
+                        title=f"UKGA event — {name}",
+                        notification_id=f"ukga_event_{event_key[:24]}",
+                    )
+                await favourite_store.async_mark_event_notified(event_key)
+            first_update = False
+            return data
         except Exception as err:
             raise UpdateFailed(f"Could not refresh UK sauna sources: {err}") from err
 
@@ -43,10 +91,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await coordinator.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-    favourite_store = FavouriteStore(hass, entry.entry_id)
-    await favourite_store.async_load()
-    hass.data[DOMAIN][entry.entry_id + "_favourites"] = favourite_store
-
     # Register a parent hub device; each sauna is exposed as a child device.
     device_registry = async_get_device_registry(hass)
     device_registry.async_get_or_create(
