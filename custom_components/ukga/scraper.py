@@ -571,7 +571,7 @@ async def _enrich_from_official_website(session, venue):
 
         structured_events, places = _extract_structured(parser, page_url)
         for place in places:
-            if place.get("name") and _normalise(place.get("name")) == _normalise(venue_name):
+            if place.get("name") and re.sub(r"[^a-z0-9]", "", place.get("name").lower()) == re.sub(r"[^a-z0-9]", "", venue_name.lower()):
                 venue["official_name"] = place["name"]
                 break
         for event in structured_events:
