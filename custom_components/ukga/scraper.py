@@ -640,6 +640,12 @@ def _official_related_pages(parser, base_url):
                 "facilities", "private", "room", "event", "whatson", "what-s-on", "calendar",
                 "visit", "sauna")
     selected, seen = [], {base_url.rstrip("/")}
+    # W3 publishes its recurring and themed sessions on this dedicated events page.
+    if base.netloc.lower().removeprefix("www.") == "w3sauna.co.uk":
+        w3_events_url = "https://www.w3sauna.co.uk/events.html"
+        if w3_events_url.rstrip("/") not in seen:
+            selected.append(w3_events_url)
+            seen.add(w3_events_url.rstrip("/"))
     for link in parser.links:
         url = link.get("url", "").split("#", 1)[0].rstrip("/")
         parsed = urlparse(url)
@@ -712,6 +718,7 @@ async def _enrich_from_official_website(session, venue):
             if not event.get("start"):
                 continue
             event["venue"] = venue_name
+            event["location"] = event.get("location") or venue_name
             event["source_directory"] = "official_website"
             event["source_type"] = "official_website"
             event["url"] = event.get("url") or page_url
