@@ -15,6 +15,23 @@ DAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
 DAY_NUM = {name: i for i, name in enumerate(DAY_NAMES)}
 TIME_RE = re.compile(r"(?P<start>(?:[01]?\d|2[0-3])[:.][0-5]\d)\s*(?:-|–|—|to)\s*(?P<end>(?:[01]?\d|2[0-3])[:.][0-5]\d)", re.I)
 ORDINAL_RE = re.compile(r"\b(first|1st|second|2nd|third|3rd|fourth|4th|last)\b", re.I)
+
+try:
+    with open(__file__.replace("scraper.py", "official_websites.json"), encoding="utf-8") as _website_file:
+        OFFICIAL_WEBSITES = json.load(_website_file)
+except (OSError, json.JSONDecodeError):
+    OFFICIAL_WEBSITES = {}
+
+WEBSITE_ALIASES = {
+    "manticore spaplymouth": "manticore",
+    "manticore spa": "manticore",
+    "pleasuredromegaysaunalondon": "pleasuredrome",
+    "pleasuredromelondon": "pleasuredrome",
+    "steamerquaysaunatorquay": "steamerquay",
+    "theboilerroomsaunabrighton": "theboilerroomhove",
+    "theboilerroomsaunahove": "theboilerroomhove",
+    "nerossaunabury": "nerossaunabury",
+}
 EVENT_WORDS = ("event", "night", "party", "session", "day", "special", "foam", "bear",
                "naked", "fetish", "discount", "social", "themed", "workout", "club")
 
@@ -96,6 +113,16 @@ def _is_region_or_directory_label(value):
     if re.match(r"^(?:north east|north west|south east|south west|east midlands|west midlands|east of england|west yorkshire|south yorkshire|east yorkshire|scotland|wales|northern ireland|england|london|newcastle|sunderland)\b", value):
         return True
     return any(term in value for term in ("sauna directory", "gay saunas uk", "saunas & cruising"))
+
+
+def _official_website(name):
+    """Return a manually researched official website for a known venue name."""
+    key = re.sub(r"[^a-z0-9]+", "", clean(name).lower())
+    lookup_key = WEBSITE_ALIASES.get(key, key)
+    record = OFFICIAL_WEBSITES.get(lookup_key)
+    if not record:
+        return None
+    return {"official_website": record["url"], "website_match_status": record.get("status", "verified").title()}
 
 
 def _venue_name_from_page(parser, fallback):
@@ -520,6 +547,9 @@ async def async_collect(session, sources):
                     if key and url != source and not _is_region_or_directory_label(label):
                         if key not in venues_by_key:
                             venues_by_key[key] = {"name": label, "url": url}
+                        website = _official_website(label)
+                        if website:
+                            venues_by_key[key].update(website)
                         opening_hours = _extract_opening_hours(parser)
                         if opening_hours:
                             venues_by_key[key]["opening_hours"] = opening_hours
