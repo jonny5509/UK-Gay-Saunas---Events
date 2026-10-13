@@ -535,7 +535,8 @@ def _official_related_pages(parser, base_url):
     """Select a small set of relevant same-site pages for venue details and events."""
     base = urlparse(base_url)
     base_host = base.netloc.lower().removeprefix("www.")
-    relevant = ("opening", "hour", "price", "pricing", "admission", "entry", "facility",
+    relevant = ("opening", "hour", "price", "pricing", "admission", "entry", "fee", "fees",
+                "tariff", "rate", "cost", "day-pass", "daypass", "membership", "facility",
                 "facilities", "private", "room", "event", "whatson", "what-s-on", "calendar",
                 "visit", "sauna")
     selected, seen = [], {base_url.rstrip("/")}
@@ -552,7 +553,7 @@ def _official_related_pages(parser, base_url):
             continue
         seen.add(url)
         selected.append(url)
-        if len(selected) >= 6:
+        if len(selected) >= 10:
             break
     return selected
 
