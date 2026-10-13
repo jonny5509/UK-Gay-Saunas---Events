@@ -86,11 +86,15 @@ class PageParser(HTMLParser):
         if tag == "a" and attrs.get("href"):
             label = clean(" ".join(str(attrs.get(k, "")) for k in ("aria-label", "title", "alt")))
             self.anchor = {"url": urljoin(self.base, attrs["href"]), "text": [label] if label else []}
+        elif tag == "img" and self.anchor is not None:
+            image_label = clean(" ".join(str(attrs.get(k, "")) for k in ("alt", "title", "aria-label")))
+            if image_label:
+                self.anchor["text"].append(image_label)
         # Some directory templates use buttons or image hotspots instead of anchors.
         if tag in ("button", "area") or (tag == "div" and any(k in attrs for k in ("data-href", "data-url", "data-website"))):
             raw_url = next((attrs.get(k) for k in ("href", "data-href", "data-url", "data-website") if attrs.get(k)), "")
             if not raw_url and attrs.get("onclick"):
-                match = re.search(r"""(?:location(?:\.href)?|window\.open)\s*\(?\s*['"]([^'"]https?://[^'"]+)['"]""", attrs["onclick"])
+                match = re.search(r"""(?:location(?:\.href)?|window\.open)\s*\(?\s*['"](https?://[^'"]+)['"]""", attrs["onclick"])
                 raw_url = match.group(1) if match else ""
             if raw_url:
                 label = clean(" ".join(str(attrs.get(k, "")) for k in ("aria-label", "title", "alt", "class")))
