@@ -237,6 +237,15 @@ def _discover_official_website(parser, venue_name):
     return {"official_website": candidates[0][1], "website_match_status": "Discovered"}
 
 
+def _is_excluded_venue(name):
+    """Exclude venues the user has identified as permanently closed."""
+    key = re.sub(r"[^a-z0-9]+", "", clean(name).lower())
+    # The Chapel Sauna in Hull may appear with or without "The" or "Hull".
+    return key in {"chapelsauna", "thechapelsauna", "chapelsaunahull", "thechapelsaunahull"} or (
+        "chapelsauna" in key and "hull" in key
+    )
+
+
 def _venue_name_from_page(parser, fallback):
     # Prefer the venue page's own heading/title over the directory card label.
     for raw in (parser.h1, parser.title):
@@ -791,6 +800,9 @@ async def async_collect(session, sources):
                     found_events, found_places = _extract_structured(parser, url)
                     source_host = urlparse(source).netloc
                     venue_label = candidate["name"] if url == source else _venue_name_from_page(parser, candidate["name"])
+                    # Omit venues reported as permanently closed, including their events.
+                    if url != source and _is_excluded_venue(venue_label):
+                        continue
                     # Venue records are intentionally limited to name and source page URL.
                     event_venue = next((p["name"] for p in found_places if p.get("name")), venue_label)
                     for event in found_events:
