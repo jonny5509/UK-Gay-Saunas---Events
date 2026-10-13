@@ -144,6 +144,17 @@ def _official_website(name):
     lookup_key = WEBSITE_ALIASES.get(key, key)
     record = OFFICIAL_WEBSITES.get(lookup_key)
     if not record:
+        # Directory titles often add a town or generic suffix to the known venue name.
+        # Use the longest unambiguous normalized match rather than requiring exact spelling.
+        matches = [
+            known_key for known_key in OFFICIAL_WEBSITES
+            if len(known_key) >= 8 and (key.startswith(known_key) or known_key.startswith(key))
+        ]
+        if matches:
+            longest = max(matches, key=len)
+            if sum(1 for item in matches if len(item) == len(longest)) == 1:
+                record = OFFICIAL_WEBSITES[longest]
+    if not record:
         return None
     return {"official_website": record["url"], "website_match_status": record.get("status", "verified").title()}
 
