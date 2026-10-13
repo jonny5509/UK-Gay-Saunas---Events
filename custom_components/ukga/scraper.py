@@ -35,11 +35,15 @@ class PageParser(HTMLParser):
         self.text = []
         self._title = False
         self.title_buf = []
+        self._h1 = False
+        self.h1_buf = []
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
         if tag == "title":
             self._title = True
+        if tag == "h1":
+            self._h1 = True
         if tag == "a" and attrs.get("href"):
             self.anchor = {"url": urljoin(self.base, attrs["href"]), "text": []}
         if tag == "script":
@@ -53,6 +57,8 @@ class PageParser(HTMLParser):
             self.text.append(value)
         if self._title:
             self.title_buf.append(value)
+        if self._h1:
+            self.h1_buf.append(value)
         if self.anchor is not None and value:
             self.anchor["text"].append(value)
         if self.in_script:
@@ -61,6 +67,8 @@ class PageParser(HTMLParser):
     def handle_endtag(self, tag):
         if tag == "title":
             self._title = False
+        if tag == "h1":
+            self._h1 = False
         if tag == "a" and self.anchor is not None:
             label = clean(" ".join(self.anchor["text"]))
             if label:
@@ -76,6 +84,31 @@ class PageParser(HTMLParser):
     @property
     def title(self):
         return clean(" ".join(self.title_buf))
+
+    @property
+    def h1(self):
+        return clean(" ".join(self.h1_buf))
+
+
+def _is_region_or_directory_label(value):
+    value = clean(value).lower()
+    if not value or re.search(r"\b\d+\s+venues?\b", value):
+        return True
+    if re.match(r"^(?:north east|north west|south east|south west|east midlands|west midlands|east of england|west yorkshire|south yorkshire|east yorkshire|scotland|wales|northern ireland|england|london|newcastle|sunderland)\b", value):
+        return True
+    return any(term in value for term in ("sauna directory", "gay saunas uk", "saunas & cruising"))
+
+
+def _venue_name_from_page(parser, fallback):
+    # Prefer the venue page's own heading/title over the directory card label.
+    for raw in (parser.h1, parser.title):
+        candidate = clean(raw)
+        if not candidate:
+            continue
+        candidate = re.split(r"\s+[|–—-]\s+", candidate, maxsplit=1)[0].strip()
+        if not _is_region_or_directory_label(candidate) and len(candidate) >= 3:
+            return candidate
+    return fallback
 
 def _iter_jsonld(value):
     if isinstance(value, dict):
@@ -284,7 +317,7 @@ async def async_collect(session, sources):
                     pages_done += 1
                     found_events, found_places = _extract_structured(parser, url)
                     source_host = urlparse(source).netloc
-                    venue_label = candidate["name"]
+                    venue_label = candidate["name"] if url == source else _venue_name_from_page(parser, candidate["name"])
                     for place in found_places:
                         place["source"] = source_host
                         place["source_directory"] = source
@@ -325,7 +358,7 @@ async def async_collect(session, sources):
                         events_by_key[(event["id"], event["start"])] = event
                     label = candidate["name"]
                     key = re.sub(r"[^a-z0-9]+", "", label.lower())
-                    if key and url != source and key not in venues_by_key:
+                    if key and url != source and not _is_region_or_directory_label(label) and key not in venues_by_key:
                         venues_by_key[key] = {
                             "name": label, "address": "", "url": url, "description": "",
                             "source": source_host, "sources": [source], "source_links": [url],
