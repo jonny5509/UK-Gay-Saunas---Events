@@ -430,6 +430,54 @@ async def async_collect(session, sources):
     except Exception as err:
         errors.append(f"{sweatbox_url}: {err}")
 
+    # Explicitly include the Pleasuredrome London listing requested by the repository owner.
+    # This guarantees it is represented even if directory crawling misses the venue card.
+    pleasuredrome_url = "https://gaysaunas.co.uk/uk/england/london/pleasuredrome-gay-sauna-london/"
+    pleasuredrome_name = "Pleasuredrome London"
+    pleasuredrome_key = "pleasuredromelondon"
+    existing_pleasuredrome_key = next((key for key, venue in venues_by_key.items()
+                                       if "pleasuredrome" in re.sub(r"[^a-z0-9]+", "", venue.get("name", "").lower())), None)
+    if existing_pleasuredrome_key:
+        pleasuredrome = venues_by_key.pop(existing_pleasuredrome_key)
+        pleasuredrome["name"] = pleasuredrome_name
+        pleasuredrome["url"] = pleasuredrome_url
+        pleasuredrome["source_links"] = list(dict.fromkeys([pleasuredrome_url, *(pleasuredrome.get("source_links") or [])]))
+        pleasuredrome["sources"] = list(dict.fromkeys([*(pleasuredrome.get("sources") or []), pleasuredrome_url]))
+        pleasuredrome["source_directory"] = pleasuredrome_url
+        venues_by_key[pleasuredrome_key] = pleasuredrome
+    else:
+        venues_by_key[pleasuredrome_key] = {
+            "name": pleasuredrome_name,
+            "address": "Arch 124 Cornwall Road, London SE1 8XE",
+            "url": pleasuredrome_url,
+            "description": "24-hour sauna and spa in Waterloo, London.",
+            "source": "gaysaunas.co.uk",
+            "sources": [pleasuredrome_url],
+            "source_links": [pleasuredrome_url],
+            "official_website": "https://www.pleasuredrome.com/",
+            "source_directory": pleasuredrome_url,
+        }
+    try:
+        html = await _get(session, pleasuredrome_url)
+        parser = PageParser(pleasuredrome_url)
+        parser.feed(html)
+        found_events, found_places = _extract_structured(parser, pleasuredrome_url)
+        for place in found_places:
+            if "pleasuredrome" in re.sub(r"[^a-z0-9]+", "", place.get("name", "").lower()):
+                venues_by_key[pleasuredrome_key]["address"] = place.get("address") or venues_by_key[pleasuredrome_key].get("address", "")
+                venues_by_key[pleasuredrome_key]["description"] = place.get("description") or venues_by_key[pleasuredrome_key].get("description", "")
+        for event in found_events:
+            if not event.get("start"):
+                continue
+            event["location"] = event.get("location") or pleasuredrome_name
+            event["source_directory"] = pleasuredrome_url
+            events_by_key[(event.get("id") or event["summary"], event["start"])] = event
+        for event in _recurring_events(parser, pleasuredrome_url, pleasuredrome_name):
+            event["source_directory"] = pleasuredrome_url
+            events_by_key[(event["id"], event["start"])] = event
+    except Exception as err:
+        errors.append(f"{pleasuredrome_url}: {err}")
+
     # Ensure Number 52 is represented even if a directory omits it or changes its links.
     # The official website is also scraped directly so published event information can be picked up.
     number52_url = "https://www.number52sauna.co.uk/"
