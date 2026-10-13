@@ -346,6 +346,51 @@ class UKGAVenuePrivateRoomsSensor(CoordinatorEntity, SensorEntity):
         }
 
 
+class UKGAVenueWebsiteSensor(CoordinatorEntity, SensorEntity):
+    """Expose the researched official website for a venue."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Official website"
+    _attr_icon = "mdi:web"
+
+    def __init__(self, coordinator, entry_id, venue, index):
+        super().__init__(coordinator)
+        self._venue = venue
+        name = venue.get("name") or "Sauna"
+        slug = _normalise(name) or "sauna"
+        self._attr_unique_id = f"{entry_id}_{index}_{slug}_official_website"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
+            name=name,
+            manufacturer="UK Gay Saunas & Events",
+            via_device=(DOMAIN, entry_id),
+            configuration_url=venue.get("official_website") or venue.get("url"),
+        )
+
+    @property
+    def _current_venue(self):
+        venues = (self.coordinator.data or {}).get("venues", [])
+        return next(
+            (venue for venue in venues
+             if venue.get("url") == self._venue.get("url")
+             or venue.get("name") == self._venue.get("name")),
+            self._venue,
+        )
+
+    @property
+    def native_value(self):
+        return self._current_venue.get("official_website") or "Not found"
+
+    @property
+    def extra_state_attributes(self):
+        venue = self._current_venue
+        return {
+            "sauna": venue.get("name"),
+            "directory_url": venue.get("url"),
+            "match_status": venue.get("website_match_status") or "Not found",
+        }
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     venues = (coordinator.data or {}).get("venues", [])
@@ -359,6 +404,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 UKGAVenueOpeningStatusSensor(coordinator, entry.entry_id, venue, index),
                 UKGAVenuePricingSensor(coordinator, entry.entry_id, venue, index),
                 UKGAVenuePrivateRoomsSensor(coordinator, entry.entry_id, venue, index),
+                UKGAVenueWebsiteSensor(coordinator, entry.entry_id, venue, index),
             )
         ],
     ])
