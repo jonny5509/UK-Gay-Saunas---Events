@@ -240,10 +240,12 @@ def _discover_official_website(parser, venue_name):
 def _is_excluded_venue(name):
     """Exclude venues the user has identified as permanently closed."""
     key = re.sub(r"[^a-z0-9]+", "", clean(name).lower())
-    # The Chapel Sauna in Hull may appear with or without "The" or "Hull".
-    return key in {"chapelsauna", "thechapelsauna", "chapelsaunahull", "thechapelsaunahull"} or (
-        "chapelsauna" in key and "hull" in key
-    )
+    # Match common directory-title variations for the two closed venues.
+    if "chapelsauna" in key and ("hull" in key or key in {"chapelsauna", "thechapelsauna"}):
+        return True
+    if "boilerroom" in key and "sheffield" in key:
+        return True
+    return key in {"theboilerroomsauna", "boilerroomsauna"} and "sheffield" in key
 
 
 def _venue_name_from_page(parser, fallback):
