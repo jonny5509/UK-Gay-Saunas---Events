@@ -153,13 +153,120 @@ class UKGAVenueNextEventSensor(CoordinatorEntity, SensorEntity):
         }
 
 
+
+class UKGAVenueOpeningStatusSensor(CoordinatorEntity, SensorEntity):
+    """Report Open/Closed only when published opening hours are available."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Opening status"
+    _attr_icon = "mdi:help-circle-outline"
+
+    def __init__(self, coordinator, entry_id, venue, index):
+        super().__init__(coordinator)
+        self._venue = venue
+        name = venue.get("name") or "Sauna"
+        slug = _normalise(name) or "sauna"
+        self._attr_unique_id = f"{entry_id}_{index}_{slug}_opening_status"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
+            name=name,
+            manufacturer="UK Gay Saunas & Events",
+            via_device=(DOMAIN, entry_id),
+            configuration_url=venue.get("official_website") or venue.get("url"),
+        )
+
+    @property
+    def _current_venue(self):
+        venues = (self.coordinator.data or {}).get("venues", [])
+        return next(
+            (venue for venue in venues
+             if venue.get("url") == self._venue.get("url")
+             or venue.get("name") == self._venue.get("name")),
+            self._venue,
+        )
+
+    @staticmethod
+    def _minutes(value):
+        try:
+            hour, minute = str(value).split(":", 1)
+            hour, minute = int(hour), int(minute)
+            if minute not in range(60) or hour not in range(25) or (hour == 24 and minute != 0):
+                return None
+            return hour * 60 + minute
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def _schedule(self):
+        value = self._current_venue.get("opening_hours")
+        if not isinstance(value, dict):
+            return None
+        schedule = {}
+        for day, ranges in value.items():
+            if not isinstance(ranges, list):
+                continue
+            parsed = []
+            for interval in ranges:
+                if not isinstance(interval, (list, tuple)) or len(interval) != 2:
+                    continue
+                start, end = self._minutes(interval[0]), self._minutes(interval[1])
+                if start is not None and end is not None and start != end:
+                    parsed.append((start, end))
+            schedule[str(day).lower()] = parsed
+        return schedule if any(schedule.values()) else None
+
+    @property
+    def native_value(self):
+        from homeassistant.util import dt as dt_util
+
+        schedule = self._schedule
+        if not schedule:
+            return "Unknown"
+        now = dt_util.now()
+        day_names = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+        today = day_names[now.weekday()]
+        yesterday = day_names[(now.weekday() - 1) % 7]
+        minute = now.hour * 60 + now.minute
+
+        for start, end in schedule.get(today, []):
+            if (start < end and start <= minute < end) or (start > end and (minute >= start or minute < end)):
+                return "Open"
+        # An overnight opening period belongs to the previous day's schedule.
+        for start, end in schedule.get(yesterday, []):
+            if start > end and minute < end:
+                return "Open"
+        return "Closed"
+
+    @property
+    def icon(self):
+        value = self.native_value
+        return {
+            "Open": "mdi:door-open",
+            "Closed": "mdi:door-closed",
+            "Unknown": "mdi:help-circle-outline",
+        }.get(value, "mdi:help-circle-outline")
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "sauna": self._current_venue.get("name"),
+            "published_opening_hours": self._schedule,
+            "source_url": self._current_venue.get("url"),
+            "status_basis": "Published opening hours; not event listings",
+        }
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     venues = (coordinator.data or {}).get("venues", [])
     async_add_entities([
         UKGACrawlSummarySensor(coordinator, entry.entry_id),
         *[
-            UKGAVenueNextEventSensor(coordinator, entry.entry_id, venue, index)
+            entity
             for index, venue in enumerate(venues)
+            for entity in (
+                UKGAVenueNextEventSensor(coordinator, entry.entry_id, venue, index),
+                UKGAVenueOpeningStatusSensor(coordinator, entry.entry_id, venue, index),
+            )
         ],
     ])
