@@ -12,9 +12,10 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import DOMAIN, DEFAULT_SOURCES, SCAN_INTERVAL
 from .scraper import async_collect
+from .favourites import FavouriteStore
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["calendar", "button", "sensor"]
+PLATFORMS = ["calendar", "button", "sensor", "switch"]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -42,6 +43,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await coordinator.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    favourite_store = FavouriteStore(hass, entry.entry_id)
+    await favourite_store.async_load()
+    hass.data[DOMAIN][entry.entry_id + "_favourites"] = favourite_store
 
     # Register a parent hub device; each sauna is exposed as a child device.
     device_registry = async_get_device_registry(hass)
@@ -62,6 +66,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         hass.data[DOMAIN].pop(entry.entry_id, None)
+        hass.data[DOMAIN].pop(entry.entry_id + "_favourites", None)
     return unloaded
 
 
