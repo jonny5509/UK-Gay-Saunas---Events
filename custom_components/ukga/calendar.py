@@ -29,6 +29,8 @@ def _calendar_event(item, start, end):
         details.append(f"Sauna: {venue}")
     if item.get("location") and item.get("location") != venue:
         details.append(f"Location: {item['location']}")
+    if item.get("price"):
+        details.append(f"Event price: {item['price']}")
     if item.get("description"):
         details.append(str(item["description"]).strip())
     if item.get("url"):
