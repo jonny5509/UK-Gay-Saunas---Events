@@ -395,19 +395,10 @@ async def async_collect(session, sources):
                             if url not in venue.setdefault("source_links", []):
                                 venue["source_links"].append(url)
                         source_venue_keys.add(key)
-                    if not candidate.get("official"):
-                        for link in _candidate_links(parser, url):
-                            # Follow internal directory links as well as official-site links.
-                            # Regional pages are navigation, not venues, but contain the venue cards we need.
-                            if link["host"] == base_host:
-                                link_path = urlparse(link["url"]).path.rstrip("/")
-                                current_path = urlparse(url).path.rstrip("/")
-                                # The directory's venue pages may sit beside (not beneath) regional pages.
-                                if (link_path and link_path != current_path
-                                        and (link_path == source_path or link_path.startswith(source_path + "/"))):
-                                    enqueue(link["url"], link["name"], False)
-                            elif link["priority"] == 0 or any(x in link["name"].lower() for x in ("official", "website", "visit", "home")):
-                                enqueue(link["url"], venue_label, True)
+                    # Do not recursively enqueue links found on venue pages. That caused
+                    # event articles, tag pages, and other nested pages to be mistaken for
+                    # additional venues. Venue discovery is limited to links on each
+                    # configured regional directory page (the initial queue above).
                 except Exception as err:
                     if url == source:
                         errors.append(f"{source}: {err}")
