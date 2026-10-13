@@ -442,8 +442,10 @@ class UKGAFavouritesSensor(CoordinatorEntity, SensorEntity):
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     venues = (coordinator.data or {}).get("venues", [])
+    favourite_store = hass.data[DOMAIN][entry.entry_id + "_favourites"]
     async_add_entities([
         UKGACrawlSummarySensor(coordinator, entry.entry_id),
+        UKGAFavouritesSensor(coordinator, entry.entry_id, favourite_store),
         *[
             entity
             for index, venue in enumerate(venues)
