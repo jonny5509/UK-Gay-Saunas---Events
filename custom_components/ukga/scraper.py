@@ -572,6 +572,53 @@ async def async_collect(session, sources):
     except Exception as err:
         errors.append(f"{locker_room_url}: {err}")
 
+    # Explicitly include Sailors Sauna London from its individual directory listing.
+    sailors_url = "https://gaysaunas.co.uk/uk/england/london/sailors-sauna-london/"
+    sailors_name = "Sailors Sauna London"
+    sailors_key = "sailorssaunalondon"
+    existing_sailors_key = next((key for key, venue in venues_by_key.items()
+                                 if "sailorssauna" in re.sub(r"[^a-z0-9]+", "", venue.get("name", "").lower())), None)
+    if existing_sailors_key:
+        sailors = venues_by_key.pop(existing_sailors_key)
+        sailors["name"] = sailors_name
+        sailors["url"] = sailors_url
+        sailors["source_links"] = list(dict.fromkeys([sailors_url, *(sailors.get("source_links") or [])]))
+        sailors["sources"] = list(dict.fromkeys([*(sailors.get("sources") or []), sailors_url]))
+        sailors["source_directory"] = sailors_url
+        venues_by_key[sailors_key] = sailors
+    else:
+        venues_by_key[sailors_key] = {
+            "name": sailors_name,
+            "address": "570–574 Commercial Road, London, E14 7JD",
+            "url": sailors_url,
+            "description": "Sailors Sauna in Limehouse, East London.",
+            "source": "gaysaunas.co.uk",
+            "sources": [sailors_url],
+            "source_links": [sailors_url],
+            "official_website": "",
+            "source_directory": sailors_url,
+        }
+    try:
+        html = await _get(session, sailors_url)
+        parser = PageParser(sailors_url)
+        parser.feed(html)
+        found_events, found_places = _extract_structured(parser, sailors_url)
+        for place in found_places:
+            if "sailorssauna" in re.sub(r"[^a-z0-9]+", "", place.get("name", "").lower()):
+                venues_by_key[sailors_key]["address"] = place.get("address") or venues_by_key[sailors_key].get("address", "")
+                venues_by_key[sailors_key]["description"] = place.get("description") or venues_by_key[sailors_key].get("description", "")
+        for event in found_events:
+            if not event.get("start"):
+                continue
+            event["location"] = event.get("location") or sailors_name
+            event["source_directory"] = sailors_url
+            events_by_key[(event.get("id") or event["summary"], event["start"])] = event
+        for event in _recurring_events(parser, sailors_url, sailors_name):
+            event["source_directory"] = sailors_url
+            events_by_key[(event["id"], event["start"])] = event
+    except Exception as err:
+        errors.append(f"{sailors_url}: {err}")
+
     # Ensure Number 52 is represented even if a directory omits it or changes its links.
     # The official website is also scraped directly so published event information can be picked up.
     number52_url = "https://www.number52sauna.co.uk/"
