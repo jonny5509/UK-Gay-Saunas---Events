@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN
 
@@ -71,10 +72,17 @@ class UKGAVenueNextEventSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator, entry_id, venue, index):
         super().__init__(coordinator)
         self._venue = venue
-        name = venue.get("name", "Sauna")
+        name = venue.get("name") or "Sauna"
         slug = _normalise(name) or "sauna"
         self._attr_name = f"{name} next event"
         self._attr_unique_id = f"{entry_id}_{index}_{slug}_next_event"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
+            name=name,
+            manufacturer="UK Gay Saunas & Events",
+            via_device=(DOMAIN, entry_id),
+            configuration_url=venue.get("official_website") or venue.get("url"),
+        )
 
     @property
     def _upcoming_events(self):
