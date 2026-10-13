@@ -23,14 +23,16 @@ except (OSError, json.JSONDecodeError):
     OFFICIAL_WEBSITES = {}
 
 WEBSITE_ALIASES = {
-    "manticore spaplymouth": "manticore",
-    "manticore spa": "manticore",
+    "manticorespaplymouth": "manticore",
+    "manticorespa": "manticore",
     "pleasuredromegaysaunalondon": "pleasuredrome",
     "pleasuredromelondon": "pleasuredrome",
     "steamerquaysaunatorquay": "steamerquay",
     "theboilerroomsaunabrighton": "theboilerroomhove",
     "theboilerroomsaunahove": "theboilerroomhove",
-    "nerossaunabury": "nerossaunabury",
+    "theboilerroomsauna": "theboilerroomhove",
+    "lockerroomlondon": "lockerroomsaunalondon",
+    "clubzeusmansfield": "clubzeussaunamansfield",
 }
 EVENT_WORDS = ("event", "night", "party", "session", "day", "special", "foam", "bear",
                "naked", "fetish", "discount", "social", "themed", "workout", "club")
