@@ -367,7 +367,9 @@ async def async_collect(session, sources):
                             if link["host"] == base_host:
                                 link_path = urlparse(link["url"]).path.rstrip("/")
                                 current_path = urlparse(url).path.rstrip("/")
-                                if link_path and link_path != current_path and link_path.startswith(current_path + "/"):
+                                # The directory's venue pages may sit beside (not beneath) regional pages.
+                                if (link_path and link_path != current_path
+                                        and (link_path.startswith("/uk/") or link_path.startswith(current_path + "/"))):
                                     queue.append({"url": link["url"], "name": link["name"], "directory": source, "official": False})
                             elif link["priority"] == 0 or any(x in link["name"].lower() for x in ("official", "website", "visit", "home")):
                                 queue.append({"url": link["url"], "name": venue_label, "directory": source, "official": True})
