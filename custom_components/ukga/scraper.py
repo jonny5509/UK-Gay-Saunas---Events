@@ -498,6 +498,32 @@ def _candidate_links(parser, source_url):
     return sorted(candidates, key=lambda x: x["priority"])
 
 
+def _official_related_pages(parser, base_url):
+    """Select a small set of relevant same-site pages for venue details and events."""
+    base = urlparse(base_url)
+    base_host = base.netloc.lower().removeprefix("www.")
+    relevant = ("opening", "hour", "price", "pricing", "admission", "entry", "facility",
+                "facilities", "private", "room", "event", "whatson", "what-s-on", "calendar",
+                "visit", "sauna")
+    selected, seen = [], {base_url.rstrip("/")}
+    for link in parser.links:
+        url = link.get("url", "").split("#", 1)[0].rstrip("/")
+        parsed = urlparse(url)
+        host = parsed.netloc.lower().removeprefix("www.")
+        if parsed.scheme not in ("http", "https") or host != base_host or url in seen:
+            continue
+        label_path = (link.get("name", "") + " " + parsed.path).lower()
+        if not any(word in label_path for word in relevant):
+            continue
+        if any(word in label_path for word in ("privacy", "cookie", "login", "register", "shop", "booking")):
+            continue
+        seen.add(url)
+        selected.append(url)
+        if len(selected) >= 6:
+            break
+    return selected
+
+
 async def _enrich_from_official_website(session, venue):
     """Fetch a curated official website and extract only explicit venue information."""
     url = venue.get("official_website")
@@ -507,40 +533,61 @@ async def _enrich_from_official_website(session, venue):
         html = await _get(session, url)
     except Exception as err:
         return [], f"{venue.get('name')}: official website fetch failed: {err}"
-    parser = PageParser(url)
-    parser.feed(html)
-    extracted = []
-    hours = _extract_opening_hours(parser)
-    if hours:
-        venue["opening_hours"] = hours
-        venue["opening_hours_source"] = "official_website"
-        extracted.append("opening_hours")
-    pricing = _extract_pricing(parser)
-    if pricing:
-        venue["pricing"] = pricing
-        venue["pricing_source"] = "official_website"
-        extracted.append("pricing")
-    private_rooms = _extract_private_rooms(parser)
-    if private_rooms:
-        venue["private_rooms"] = private_rooms
-        venue["private_rooms_source"] = "official_website"
-        extracted.append("private_rooms")
-
-    structured_events, places = _extract_structured(parser, url)
-    venue_name = venue.get("name") or (places[0]["name"] if places else "Sauna")
-    for event in structured_events:
-        if not event.get("start"):
+    homepage = PageParser(url)
+    homepage.feed(html)
+    pages = [(url, homepage)]
+    # Many sites publish hours, prices, and events on dedicated pages rather than home.
+    for page_url in _official_related_pages(homepage, url):
+        try:
+            page_html = await _get(session, page_url)
+            parser = PageParser(page_url)
+            parser.feed(page_html)
+            pages.append((page_url, parser))
+        except Exception:
             continue
-        event["venue"] = venue_name
-        event["source_directory"] = "official_website"
-        event["source_type"] = "official_website"
-        event["url"] = event.get("url") or url
-    recurring = _recurring_events(parser, url, venue_name)
-    for event in recurring:
-        event["venue"] = venue_name
-        event["source_directory"] = "official_website"
-        event["source_type"] = "official_website"
-    return [event for event in structured_events + recurring if event.get("start")], None
+
+    extracted = set()
+    events = []
+    venue_name = venue.get("name") or homepage.h1 or "Sauna"
+    for page_url, parser in pages:
+        hours = _extract_opening_hours(parser)
+        if hours and "opening_hours" not in extracted:
+            venue["opening_hours"] = hours
+            venue["opening_hours_source"] = "official_website"
+            venue["opening_hours_source_url"] = page_url
+            extracted.add("opening_hours")
+        pricing = _extract_pricing(parser)
+        if pricing and "pricing" not in extracted:
+            venue["pricing"] = pricing
+            venue["pricing_source"] = "official_website"
+            venue["pricing_source_url"] = page_url
+            extracted.add("pricing")
+        private_rooms = _extract_private_rooms(parser)
+        if private_rooms and "private_rooms" not in extracted:
+            venue["private_rooms"] = private_rooms
+            venue["private_rooms_source"] = "official_website"
+            venue["private_rooms_source_url"] = page_url
+            extracted.add("private_rooms")
+
+        structured_events, places = _extract_structured(parser, page_url)
+        for place in places:
+            if place.get("name") and _normalise(place.get("name")) == _normalise(venue_name):
+                venue["official_name"] = place["name"]
+                break
+        for event in structured_events:
+            if not event.get("start"):
+                continue
+            event["venue"] = venue_name
+            event["source_directory"] = "official_website"
+            event["source_type"] = "official_website"
+            event["url"] = event.get("url") or page_url
+            events.append(event)
+        for event in _recurring_events(parser, page_url, venue_name):
+            event["venue"] = venue_name
+            event["source_directory"] = "official_website"
+            event["source_type"] = "official_website"
+            events.append(event)
+    return events, None
 
 
 async def _enrich_venues_from_official_websites(session, venues):
