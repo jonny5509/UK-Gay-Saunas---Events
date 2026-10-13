@@ -251,7 +251,8 @@ class UKGAVenueOpeningStatusSensor(CoordinatorEntity, SensorEntity):
         return {
             "sauna": self._current_venue.get("name"),
             "published_opening_hours": self._schedule,
-            "source_url": self._current_venue.get("url"),
+            "source_url": self._current_venue.get("opening_hours_source_url") or self._current_venue.get("url"),
+            "information_source": self._current_venue.get("opening_hours_source", "directory"),
             "status_basis": "Published opening hours; not event listings",
         }
 
@@ -296,8 +297,9 @@ class UKGAVenuePricingSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         return {
             "sauna": self._current_venue.get("name"),
-            "source_url": self._current_venue.get("url"),
-            "pricing_basis": "Published directory-page information; may be unavailable or incomplete",
+            "source_url": self._current_venue.get("pricing_source_url") or self._current_venue.get("url"),
+            "information_source": self._current_venue.get("pricing_source", "directory"),
+            "pricing_basis": "Official website preferred; directory information used when no official price is found",
         }
 
 
@@ -341,8 +343,9 @@ class UKGAVenuePrivateRoomsSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         return {
             "sauna": self._current_venue.get("name"),
-            "source_url": self._current_venue.get("url"),
-            "status_basis": "Explicit private-room wording on the directory page; absence of information is Unknown",
+            "source_url": self._current_venue.get("private_rooms_source_url") or self._current_venue.get("url"),
+            "information_source": self._current_venue.get("private_rooms_source", "directory"),
+            "status_basis": "Explicit private-room wording; official website preferred, directory used as fallback; absence of information is Unknown",
         }
 
 
