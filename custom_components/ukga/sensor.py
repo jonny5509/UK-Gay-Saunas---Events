@@ -439,6 +439,51 @@ class UKGAFavouritesSensor(CoordinatorEntity, SensorEntity):
         }
 
 
+class UKGANotificationSubscriptionsSensor(CoordinatorEntity, SensorEntity):
+    """List venues whose event notifications are enabled."""
+
+    _attr_has_entity_name = False
+    _attr_name = "UKGA notification subscriptions"
+    _attr_icon = "mdi:bell-ring"
+
+    def __init__(self, coordinator, entry_id, favourite_store):
+        super().__init__(coordinator)
+        self._favourite_store = favourite_store
+        self._attr_unique_id = f"{entry_id}_notification_subscriptions"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name="UKGA Sauna Hub",
+            manufacturer="UK Gay Saunas & Events",
+            model="Sauna directory and events hub",
+        )
+
+    @property
+    def _subscribed_venues(self):
+        venues = (self.coordinator.data or {}).get("venues", [])
+        return [
+            venue for venue in venues
+            if self._favourite_store.notifications_enabled(venue)
+        ]
+
+    @property
+    def native_value(self):
+        return len(self._subscribed_venues)
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "notification_subscriptions": [
+                {
+                    "name": venue.get("name"),
+                    "directory_url": venue.get("url"),
+                    "official_website": venue.get("official_website"),
+                }
+                for venue in self._subscribed_venues
+            ],
+            "notification_type": "Newly discovered upcoming events",
+        }
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     venues = (coordinator.data or {}).get("venues", [])
@@ -446,6 +491,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities([
         UKGACrawlSummarySensor(coordinator, entry.entry_id),
         UKGAFavouritesSensor(coordinator, entry.entry_id, favourite_store),
+        UKGANotificationSubscriptionsSensor(coordinator, entry.entry_id, favourite_store),
         *[
             entity
             for index, venue in enumerate(venues)
