@@ -6,6 +6,7 @@ from urllib.parse import quote_plus
 
 from homeassistant.components import persistent_notification
 from homeassistant.components.button import ButtonEntity
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -22,8 +23,16 @@ class UKGAVenueInformationButton(CoordinatorEntity, ButtonEntity):
         super().__init__(coordinator)
         self._venue = venue
         name = venue.get("name") or "Sauna"
+        slug = "".join(c for c in name.lower() if c.isalnum()) or "sauna"
         self._attr_name = f"{name} information"
-        self._attr_unique_id = f"{entry_id}_{index}_{name.lower().replace(' ', '_')}_information"
+        self._attr_unique_id = f"{entry_id}_{index}_{slug}_information"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
+            name=name,
+            manufacturer="UK Gay Saunas & Events",
+            via_device=(DOMAIN, entry_id),
+            configuration_url=venue.get("official_website") or venue.get("url"),
+        )
 
     async def async_press(self):
         venue = self._venue
