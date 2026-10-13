@@ -171,6 +171,101 @@ def _extract_structured(parser, page_url):
                         "description": clean(obj.get("description", ""))})
     return events, places
 
+
+def _extract_opening_hours(parser):
+    """Extract a weekly schedule only when explicit published hours can be parsed."""
+    weekdays = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+    aliases = {
+        "mo": 0, "mon": 0, "monday": 0,
+        "tu": 1, "tue": 1, "tues": 1, "tuesday": 1,
+        "we": 2, "wed": 2, "wednesday": 2,
+        "th": 3, "thu": 3, "thur": 3, "thurs": 3, "thursday": 3,
+        "fr": 4, "fri": 4, "friday": 4,
+        "sa": 5, "sat": 5, "saturday": 5,
+        "su": 6, "sun": 6, "sunday": 6,
+    }
+    hours = {day: [] for day in weekdays}
+
+    def clock(value):
+        match = re.fullmatch(r"(\d{1,2})[:.](\d{2})", str(value).strip())
+        if not match:
+            return None
+        hour, minute = int(match.group(1)), int(match.group(2))
+        if minute > 59 or hour > 24 or (hour == 24 and minute != 0):
+            return None
+        return f"{hour:02d}:{minute:02d}"
+
+    def day_indices(value):
+        value = re.sub(r"^.*?/", "", str(value).lower()).replace("http:", "").replace("https:", "")
+        value = value.strip().rstrip("/")
+        if value in aliases:
+            return [aliases[value]]
+        if "-" in value:
+            left, right = [part.strip() for part in value.split("-", 1)]
+            if left in aliases and right in aliases:
+                a, b = aliases[left], aliases[right]
+                return list(range(a, b + 1)) if a <= b else list(range(a, 7)) + list(range(0, b + 1))
+        return []
+
+    def add_range(day_values, opening, closing):
+        opening, closing = clock(opening), clock(closing)
+        if not opening or not closing or opening == closing:
+            return False
+        indices = []
+        if isinstance(day_values, str):
+            day_values = [day_values]
+        for day_value in (day_values or []):
+            raw = str(day_value).lower().replace("https://schema.org/", "").replace("http://schema.org/", "")
+            for part in re.split(r"\s*,\s*", raw):
+                indices.extend(day_indices(part))
+        if not indices:
+            return False
+        for index in set(indices):
+            hours[weekdays[index]].append([opening, closing])
+        return True
+
+    found = False
+    for raw in parser.scripts:
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for obj in _iter_jsonld(data):
+            specs = obj.get("openingHoursSpecification")
+            if isinstance(specs, dict):
+                specs = [specs]
+            for spec in specs or []:
+                if isinstance(spec, dict):
+                    found = add_range(spec.get("dayOfWeek", []), spec.get("opens", ""), spec.get("closes", "")) or found
+            published = obj.get("openingHours", [])
+            if isinstance(published, str):
+                published = [published]
+            for entry in published or []:
+                match = re.search(
+                    r"([A-Za-z]{2,9}(?:\s*-\s*[A-Za-z]{2,9})?(?:\s*,\s*[A-Za-z]{2,9})*)\s+(\d{1,2}[:.]\d{2})\s*-\s*(\d{1,2}[:.]\d{2})",
+                    str(entry),
+                )
+                if match:
+                    found = add_range(re.split(r"\s*,\s*", match.group(1)), match.group(2), match.group(3)) or found
+
+    # As a fallback, parse time ranges only in an explicitly labelled opening-hours section.
+    if not found:
+        text = " ".join(parser.text)
+        section = re.search(r"opening\s+hours?\b", text, re.I)
+        if section:
+            excerpt = text[section.end():section.end() + 900]
+            pattern = re.compile(
+                r"\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun)\b"
+                r"[^A-Za-z0-9]{0,12}(\d{1,2}[:.]\d{2})\s*(?:-|–|—|to)\s*(\d{1,2}[:.]\d{2})",
+                re.I,
+            )
+            for match in pattern.finditer(excerpt):
+                found = add_range([match.group(1)], match.group(2), match.group(3)) or found
+
+    if not found:
+        return None
+    return hours
+
 def _parse_clock(value):
     if not value:
         return None
@@ -361,6 +456,9 @@ async def async_collect(session, sources):
                     if key and url != source and not _is_region_or_directory_label(label):
                         if key not in venues_by_key:
                             venues_by_key[key] = {"name": label, "url": url}
+                        opening_hours = _extract_opening_hours(parser)
+                        if opening_hours:
+                            venues_by_key[key]["opening_hours"] = opening_hours
                         source_venue_keys.add(key)
                     # Do not recursively enqueue links found on venue pages. That caused
                     # event articles, tag pages, and other nested pages to be mistaken for
