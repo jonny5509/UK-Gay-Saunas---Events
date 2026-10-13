@@ -239,6 +239,11 @@ def _candidate_links(parser, source_url):
         parsed = urlparse(url)
         host = parsed.netloc.lower().removeprefix("www.")
         name = clean(link["name"])
+        # Directory region cards (for example, "North East ... 2 venues") are not individual saunas.
+        if re.search(r"\b\d+\s+venues?\b", name, re.I):
+            continue
+        if re.match(r"^(?:north east|north west|south east|south west|east midlands|west midlands|east of england|west yorkshire|south yorkshire|east yorkshire|scotland|wales|northern ireland|england|london)\b", name, re.I):
+            continue
         if parsed.scheme not in ("http", "https") or not host or not name or url in seen:
             continue
         if any(word in name.lower() for word in SKIP):
