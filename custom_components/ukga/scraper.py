@@ -84,7 +84,17 @@ class PageParser(HTMLParser):
         if tag == "h1":
             self._h1 = True
         if tag == "a" and attrs.get("href"):
-            self.anchor = {"url": urljoin(self.base, attrs["href"]), "text": []}
+            label = clean(" ".join(str(attrs.get(k, "")) for k in ("aria-label", "title", "alt")))
+            self.anchor = {"url": urljoin(self.base, attrs["href"]), "text": [label] if label else []}
+        # Some directory templates use buttons or image hotspots instead of anchors.
+        if tag in ("button", "area") or (tag == "div" and any(k in attrs for k in ("data-href", "data-url", "data-website"))):
+            raw_url = next((attrs.get(k) for k in ("href", "data-href", "data-url", "data-website") if attrs.get(k)), "")
+            if not raw_url and attrs.get("onclick"):
+                match = re.search(r"""(?:location(?:\.href)?|window\.open)\s*\(?\s*['"]([^'"]https?://[^'"]+)['"]""", attrs["onclick"])
+                raw_url = match.group(1) if match else ""
+            if raw_url:
+                label = clean(" ".join(str(attrs.get(k, "")) for k in ("aria-label", "title", "alt", "class")))
+                self.links.append({"url": urljoin(self.base, raw_url), "name": label})
         if tag == "script":
             self.in_script = True
             self.script_type = attrs.get("type", "")
@@ -110,8 +120,9 @@ class PageParser(HTMLParser):
             self._h1 = False
         if tag == "a" and self.anchor is not None:
             label = clean(" ".join(self.anchor["text"]))
-            if label:
-                self.links.append({"url": self.anchor["url"], "name": label})
+            # Retain unlabeled links too: linked logos/icons often have no text,
+            # and the destination hostname can still identify the venue website.
+            self.links.append({"url": self.anchor["url"], "name": label})
             self.anchor = None
         if tag == "script" and self.in_script:
             if "ld+json" in self.script_type.lower():
@@ -182,17 +193,40 @@ def _discover_official_website(parser, venue_name):
             continue
         # Only trust an explicitly labelled website link or a domain that resembles
         # the venue name. This avoids treating adverts and unrelated outbound links as official.
-        label_match = any(term in label for term in ("official website", "visit website", "venue website", "website", "web site", "visit site"))
+        label_match = any(term in label for term in ("official website", "visit website", "venue website", "website", "web site", "visit site", "homepage", "official site"))
         host_key = re.sub(r"[^a-z0-9]+", "", host.split(".")[0])
         name_tokens = [token for token in re.sub(r"[^a-z0-9]+", " ", clean(venue_name).lower()).split()
-                       if len(token) >= 4 and token not in ("sauna", "health", "club", "spa", "complex")]
+                       if len(token) >= 3 and token not in ("the", "and", "sauna", "health", "club", "spa", "complex", "london")]
+        # Ignore generic labels and don't match tiny/common fragments against a domain.
         host_match = any(token in host_key for token in name_tokens)
         if not label_match and not host_match:
             continue
-        score = (4 if label_match else 0) + (3 if host_match else 0)
+        score = (5 if label_match else 0) + (4 if host_match else 0)
         if parsed.path in ("", "/"):
             score += 1
         candidates.append((score, url))
+
+    # Some venue pages publish the official domain in Schema.org sameAs fields
+    # rather than a visible website link. Only use external sameAs URLs here.
+    for raw in parser.scripts:
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for obj in _iter_jsonld(data):
+            values = obj.get("sameAs", [])
+            if isinstance(values, str):
+                values = [values]
+            for value in values or []:
+                if not isinstance(value, str):
+                    continue
+                parsed = urlparse(value)
+                host = parsed.netloc.lower().removeprefix("www.")
+                if parsed.scheme not in ("http", "https") or not host or any(bad in host for bad in ignored_hosts):
+                    continue
+                host_key = re.sub(r"[^a-z0-9]+", "", host.split(".")[0])
+                if any(token in host_key for token in name_tokens):
+                    candidates.append((6, value))
     if not candidates:
         return None
     candidates.sort(reverse=True)
