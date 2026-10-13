@@ -29,6 +29,13 @@ def _event_start(event):
 def _normalise(value):
     return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
 
+def _safe_state_text(value, limit=250):
+    """Keep text sensor states within Home Assistant's 255-character limit."""
+    text = " ".join(str(value or "").split())
+    if len(text) > limit:
+        return text[: limit - 3].rstrip() + "..."
+    return text or "Unknown"
+
 
 def _event_matches_venue(event, venue):
     """Match events to a venue using names, locations, and known venue URLs."""
@@ -134,7 +141,7 @@ class UKGAVenueNextEventSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         events = self._upcoming_events
-        return events[0][1].get("summary") if events else "No upcoming events"
+        return _safe_state_text(events[0][1].get("summary")) if events else "No upcoming events"
 
     @property
     def extra_state_attributes(self):
