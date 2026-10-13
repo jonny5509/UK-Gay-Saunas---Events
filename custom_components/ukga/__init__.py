@@ -36,54 +36,58 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     favourite_store = FavouriteStore(hass, entry.entry_id)
     await favourite_store.async_load()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id + "_favourites"] = favourite_store
-    first_update = True
-
     async def async_update_data():
-        nonlocal first_update
         try:
             data = await async_collect(session, sources)
             from .sensor import _event_matches_venue, _event_start
+            from .favourites import venue_key
 
             events = data.get("events", [])
             venues = data.get("venues", [])
             now = datetime.now().astimezone()
+            reminder_deadline = now + timedelta(hours=24)
             processed_event_keys = set()
             for event in events:
                 start = _event_start(event)
-                if not start or start < now:
+                # Send a reminder during the 24 hours before an event starts.
+                if not start or start <= now or start > reminder_deadline:
                     continue
                 identity = "|".join(str(event.get(field) or "") for field in (
                     "summary", "start", "end", "url", "location"
                 ))
-                event_key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
-                if event_key in favourite_store.notified_events:
-                    continue
-                # On the first crawl after startup, establish a baseline instead
-                # of sending a burst of notifications for existing listings.
-                if first_update:
-                    processed_event_keys.add(event_key)
-                    continue
+                event_fingerprint = hashlib.sha256(identity.encode("utf-8")).hexdigest()
                 for venue in venues:
                     if not favourite_store.notifications_enabled(venue):
                         continue
                     if not _event_matches_venue(event, venue):
                         continue
+                    # Track reminders per venue, so one event can notify each
+                    # subscribed sauna independently and only once.
+                    reminder_key = "reminder:" + hashlib.sha256(
+                        f"{event_fingerprint}|{venue_key(venue)}".encode("utf-8")
+                    ).hexdigest()
+                    if reminder_key in favourite_store.notified_events:
+                        continue
                     name = venue.get("name") or "Sauna"
-                    summary = event.get("summary") or "New upcoming event"
+                    summary = event.get("summary") or "Upcoming event"
                     start_text = start.strftime("%a %d %b, %H:%M %Z")
-                    details = [f"**{summary}**", f"Venue: {name}", f"Starts: {start_text}"]
+                    details = [
+                        f"**{summary}**",
+                        f"Venue: {name}",
+                        f"Starts: {start_text}",
+                        "Reminder: this event starts within the next 24 hours.",
+                    ]
                     if event.get("url"):
                         details.append(f"[Event details]({event['url']})")
                     persistent_notification.async_create(
                         hass,
                         "\n\n".join(details),
-                        title=f"UKGA event — {name}",
-                        notification_id=f"ukga_event_{event_key[:24]}",
+                        title=f"UKGA event tomorrow — {name}",
+                        notification_id=f"ukga_reminder_{reminder_key.split(':', 1)[1][:24]}",
                     )
-                processed_event_keys.add(event_key)
+                    processed_event_keys.add(reminder_key)
             if processed_event_keys:
                 await favourite_store.async_mark_events_notified(processed_event_keys)
-            first_update = False
             return data
         except Exception as err:
             raise UpdateFailed(f"Could not refresh UK sauna sources: {err}") from err
