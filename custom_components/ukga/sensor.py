@@ -227,7 +227,7 @@ class UKGAVenueOpeningStatusSensor(CoordinatorEntity, SensorEntity):
 
         schedule = self._schedule
         if not schedule:
-            return "Unknown"
+            return "Not published"
         now = dt_util.now()
         day_names = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
         today = day_names[now.weekday()]
@@ -249,7 +249,7 @@ class UKGAVenueOpeningStatusSensor(CoordinatorEntity, SensorEntity):
         return {
             "Open": "mdi:door-open",
             "Closed": "mdi:door-closed",
-            "Unknown": "mdi:help-circle-outline",
+            "Not published": "mdi:help-circle-outline",
         }.get(value, "mdi:help-circle-outline")
 
     @property
