@@ -1,4 +1,4 @@
-"""Home Assistant calendar entity for dated events discovered in Schema.org markup."""
+"""Clean, title-only Home Assistant calendar for UKGA events."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -6,6 +6,7 @@ from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 from .const import DOMAIN
+
 
 def _parse(value):
     if not value:
@@ -15,6 +16,13 @@ def _parse(value):
         return dt_util.as_local(parsed)
     except (ValueError, TypeError):
         return None
+
+
+def _calendar_event(item, start, end):
+    # Keep calendar entries tidy: the event title is the only displayed text.
+    title = " ".join(str(item.get("summary") or "Event").split())
+    return CalendarEvent(summary=title, start=start, end=end, description="", location="")
+
 
 class UKGAEventsCalendar(CoordinatorEntity, CalendarEntity):
     _attr_has_entity_name = True
@@ -36,11 +44,7 @@ class UKGAEventsCalendar(CoordinatorEntity, CalendarEntity):
         if not events:
             return None
         start, end, item = min(events, key=lambda row: row[0])
-        return CalendarEvent(
-            summary=item.get("summary", "Sauna event"), start=start, end=end,
-            description=item.get("description", ""),
-            location=item.get("location", ""),
-        )
+        return _calendar_event(item, start, end)
 
     async def async_get_events(self, hass, start_date, end_date):
         results = []
@@ -51,13 +55,9 @@ class UKGAEventsCalendar(CoordinatorEntity, CalendarEntity):
             if not end or end < start:
                 end = start
             if start < end_date and end >= start_date:
-                results.append(CalendarEvent(
-                    summary=item.get("summary", "Sauna event"),
-                    start=start, end=end,
-                    description=(item.get("description", "") + "\nSource: " + item.get("url", "")).strip(),
-                    location=item.get("location", ""),
-                ))
+                results.append(_calendar_event(item, start, end))
         return sorted(results, key=lambda item: item.start)
+
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
