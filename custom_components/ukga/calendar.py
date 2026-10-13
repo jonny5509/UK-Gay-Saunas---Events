@@ -1,10 +1,12 @@
-"""Clean, title-only Home Assistant calendar for UKGA events."""
+"""Calendar of UKGA events, with venue details available when an event is opened."""
 from __future__ import annotations
 
 from datetime import datetime
+
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
+
 from .const import DOMAIN
 
 
@@ -19,9 +21,25 @@ def _parse(value):
 
 
 def _calendar_event(item, start, end):
-    # Keep calendar entries tidy: the event title is the only displayed text.
+    # Keep the calendar grid title-only; put venue and useful details in the event view.
     title = " ".join(str(item.get("summary") or "Event").split())
-    return CalendarEvent(summary=title, start=start, end=end, description="", location="")
+    venue = " ".join(str(item.get("venue") or item.get("location") or "Venue not identified").split())
+    details = []
+    if venue:
+        details.append(f"Sauna: {venue}")
+    if item.get("location") and item.get("location") != venue:
+        details.append(f"Location: {item['location']}")
+    if item.get("description"):
+        details.append(str(item["description"]).strip())
+    if item.get("url"):
+        details.append(f"Event / venue link: {item['url']}")
+    return CalendarEvent(
+        summary=title,
+        start=start,
+        end=end,
+        description="\n".join(details),
+        location=venue if venue != "Venue not identified" else "",
+    )
 
 
 class UKGAEventsCalendar(CoordinatorEntity, CalendarEntity):
