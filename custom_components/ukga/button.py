@@ -38,6 +38,11 @@ class UKGAVenueInformationButton(CoordinatorEntity, ButtonEntity):
         data = self.coordinator.data or {}
         name = venue.get("name") or "Unnamed sauna"
         sections = [f"# {name}"]
+
+        venue_url = venue.get("official_website") or venue.get("url")
+        if venue_url:
+            sections.extend(["", f"[Open venue page]({venue_url})", venue_url])
+
         now = datetime.now().astimezone()
         upcoming = []
         for event in data.get("events", []):
@@ -55,10 +60,9 @@ class UKGAVenueInformationButton(CoordinatorEntity, ButtonEntity):
                 sections.append(f"  - Ends: {event['end']}")
             if event.get("location"):
                 sections.append(f"  - Location: {event['location']}")
-            if event.get("description"):
-                sections.append(f"  - Details: {event['description']}")
             if event.get("url"):
-                sections.append(f"  - Link: {event['url']}")
+                sections.append(f"  - [Event details]({event['url']})")
+                sections.append(f"    {event['url']}")
 
         notification_id = f"ukga_sauna_{self._attr_unique_id}"
         persistent_notification.async_create(
