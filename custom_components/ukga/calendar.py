@@ -23,6 +23,8 @@ def _parse(value):
 def _calendar_event(item, start, end):
     # Keep the calendar grid title-only; put venue and useful details in the event view.
     title = " ".join(str(item.get("summary") or "Event").split())
+    if len(title) > 250:
+        title = title[:247].rstrip() + "..."
     if end < dt_util.now():
         title = f"✓ Past — {title}"
     venue = " ".join(str(item.get("venue") or item.get("location") or "Venue not identified").split())
