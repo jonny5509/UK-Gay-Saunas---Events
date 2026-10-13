@@ -147,6 +147,46 @@ def _official_website(name):
         return None
     return {"official_website": record["url"], "website_match_status": record.get("status", "verified").title()}
 
+def _discover_official_website(parser, venue_name):
+    """Find an official-site link explicitly exposed on a venue's own directory page."""
+    venue_key = re.sub(r"[^a-z0-9]+", "", clean(venue_name).lower())
+    ignored_hosts = (
+        "gaysaunas.co.uk", "facebook.com", "instagram.com", "tiktok.com",
+        "youtube.com", "twitter.com", "x.com", "wa.me", "whatsapp.com",
+        "google.com", "maps.google", "tripadvisor.", "travelgay.com",
+        "thegayuk.com", "patroc.com", "wikipedia.org", "linktr.ee",
+        "booking.com", "eventbrite.", "meetup.com",
+    )
+    candidates = []
+    for link in parser.links:
+        url = link.get("url", "").split("#", 1)[0]
+        parsed = urlparse(url)
+        host = parsed.netloc.lower().removeprefix("www.")
+        label = clean(link.get("name", "")).lower()
+        if parsed.scheme not in ("http", "https") or not host:
+            continue
+        if any(bad in host for bad in ignored_hosts):
+            continue
+        if any(word in label for word in ("facebook", "instagram", "tiktok", "youtube", "privacy", "cookie")):
+            continue
+        # Only trust an explicitly labelled website link or a domain that resembles
+        # the venue name. This avoids treating adverts and unrelated outbound links as official.
+        label_match = any(term in label for term in ("official website", "visit website", "venue website", "website", "web site", "visit site"))
+        host_key = re.sub(r"[^a-z0-9]+", "", host.split(".")[0])
+        name_tokens = [token for token in re.sub(r"[^a-z0-9]+", " ", clean(venue_name).lower()).split()
+                       if len(token) >= 4 and token not in ("sauna", "health", "club", "spa", "complex")]
+        host_match = any(token in host_key for token in name_tokens)
+        if not label_match and not host_match:
+            continue
+        score = (4 if label_match else 0) + (3 if host_match else 0)
+        if parsed.path in ("", "/"):
+            score += 1
+        candidates.append((score, url))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return {"official_website": candidates[0][1], "website_match_status": "Discovered"}
+
 
 def _venue_name_from_page(parser, fallback):
     # Prefer the venue page's own heading/title over the directory card label.
@@ -721,7 +761,9 @@ async def async_collect(session, sources):
                     if key and url != source and not _is_region_or_directory_label(label):
                         if key not in venues_by_key:
                             venues_by_key[key] = {"name": label, "url": url}
-                        website = _official_website(label)
+                        # Prefer the curated mapping; if absent, use a clearly labelled
+                        # outbound website link published on the venue's own directory page.
+                        website = _official_website(label) or _discover_official_website(parser, label)
                         if website:
                             venues_by_key[key].update(website)
                         opening_hours = _extract_opening_hours(parser)
