@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from urllib.parse import quote_plus
 
 from homeassistant.components import persistent_notification
 from homeassistant.components.button import ButtonEntity
@@ -38,25 +37,7 @@ class UKGAVenueInformationButton(CoordinatorEntity, ButtonEntity):
         venue = self._venue
         data = self.coordinator.data or {}
         name = venue.get("name") or "Unnamed sauna"
-        address = venue.get("address") or "Address not available"
-        website = venue.get("official_website") or venue.get("url") or ""
-        map_query = venue.get("address") or name
-        sections = [
-            f"# {name}",
-            f"- **Address:** {address}",
-            f"- **Website:** {website or 'Not available'}",
-            f"- **Map:** https://www.google.com/maps/search/?api=1&query={quote_plus(map_query)}",
-        ]
-        if venue.get("description"):
-            sections.append(f"- **Description:** {venue['description']}")
-        if venue.get("url"):
-            sections.append(f"- **Source:** {venue['url']}")
-        if venue.get("source_directory"):
-            sections.append(f"- **Directory:** {venue['source_directory']}")
-        for link in venue.get("source_links") or []:
-            if link and link not in (venue.get("url"), website):
-                sections.append(f"- **Additional link:** {link}")
-
+        sections = [f"# {name}"]
         now = datetime.now().astimezone()
         upcoming = []
         for event in data.get("events", []):
