@@ -141,6 +141,46 @@ def _date(value):
     except (ValueError, TypeError):
         return None
 
+
+def _extract_pricing(parser):
+    """Extract a concise price statement only when the page explicitly labels pricing."""
+    text = clean(" ".join(parser.text))
+    patterns = (
+        r"(?:entry\s+(?:price|fee|cost)|prices?|pricing|admission|door\s+price|entrance\s+fee)\s*[:\-–]?\s*((?:£|GBP\s*)\s?\d+(?:\.\d{1,2})?(?:\s*(?:-|–|to)\s*(?:£\s?)?\d+(?:\.\d{1,2})?)?(?:\s*(?:per\s+(?:person|visit|session)|each))?)",
+        r"(?:entry\s+(?:price|fee|cost)|prices?|pricing|admission|door\s+price|entrance\s+fee)\s*[:\-–]?\s*([^.;]{1,100})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            value = clean(match.group(1)).strip(" :-–")
+            if value and re.search(r"£|\bGBP\b|\bfree\b|\d", value, re.I):
+                return value[:140]
+    for raw in parser.scripts:
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for obj in _iter_jsonld(data):
+            offers = obj.get("offers")
+            if isinstance(offers, dict):
+                offers = [offers]
+            for offer in offers or []:
+                if isinstance(offer, dict) and offer.get("price") is not None:
+                    currency = clean(offer.get("priceCurrency") or "GBP")
+                    return f"{currency} {offer['price']}"
+    return None
+
+def _event_price(obj):
+    offers = obj.get("offers")
+    if isinstance(offers, dict):
+        offers = [offers]
+    values = []
+    for offer in offers or []:
+        if isinstance(offer, dict) and offer.get("price") is not None:
+            currency = clean(offer.get("priceCurrency") or "GBP")
+            values.append(f"{currency} {offer['price']}")
+    return ", ".join(dict.fromkeys(values)) or None
+
 def _extract_structured(parser, page_url):
     events, places = [], []
     for raw in parser.scripts:
@@ -160,6 +200,7 @@ def _extract_structured(parser, page_url):
                     "id": clean(obj.get("@id") or obj.get("url") or f"{page_url}#{clean(obj.get('name'))}"),
                     "summary": clean(obj.get("name") or "Sauna event"), "start": start, "end": end,
                     "description": clean(obj.get("description", "")),
+                    "price": _event_price(obj),
                     "location": loc_addr or clean(loc_name),
                     "url": urljoin(page_url, str(obj.get("url") or page_url)),
                 })
@@ -459,6 +500,9 @@ async def async_collect(session, sources):
                         opening_hours = _extract_opening_hours(parser)
                         if opening_hours:
                             venues_by_key[key]["opening_hours"] = opening_hours
+                        pricing = _extract_pricing(parser)
+                        if pricing:
+                            venues_by_key[key]["pricing"] = pricing
                         source_venue_keys.add(key)
                     # Do not recursively enqueue links found on venue pages. That caused
                     # event articles, tag pages, and other nested pages to be mistaken for
@@ -489,6 +533,7 @@ async def async_collect(session, sources):
                 "location": event.get("location"),
                 "venue": event.get("venue"),
                 "description": event.get("description"),
+                "price": event.get("price"),
                 "url": event.get("url"),
                 "source_directory": event.get("source_directory"),
                 "recurring": event.get("recurring", False),
