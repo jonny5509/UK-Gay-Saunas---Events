@@ -1,7 +1,8 @@
-"""Scrape venue listings and event schedules from the configured directory only."""
+"""Scrape venue directories, then enrich matched venues from their official websites."""
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
+import asyncio
 from html.parser import HTMLParser
 import json
 import re
@@ -496,6 +497,76 @@ def _candidate_links(parser, source_url):
         candidates.append({"url": url, "name": name, "priority": priority, "host": host})
     return sorted(candidates, key=lambda x: x["priority"])
 
+
+async def _enrich_from_official_website(session, venue):
+    """Fetch a curated official website and extract only explicit venue information."""
+    url = venue.get("official_website")
+    if not url:
+        return [], None
+    try:
+        html = await _get(session, url)
+    except Exception as err:
+        return [], f"{venue.get('name')}: official website fetch failed: {err}"
+    parser = PageParser(url)
+    parser.feed(html)
+    extracted = []
+    hours = _extract_opening_hours(parser)
+    if hours:
+        venue["opening_hours"] = hours
+        venue["opening_hours_source"] = "official_website"
+        extracted.append("opening_hours")
+    pricing = _extract_pricing(parser)
+    if pricing:
+        venue["pricing"] = pricing
+        venue["pricing_source"] = "official_website"
+        extracted.append("pricing")
+    private_rooms = _extract_private_rooms(parser)
+    if private_rooms:
+        venue["private_rooms"] = private_rooms
+        venue["private_rooms_source"] = "official_website"
+        extracted.append("private_rooms")
+
+    structured_events, places = _extract_structured(parser, url)
+    venue_name = venue.get("name") or (places[0]["name"] if places else "Sauna")
+    for event in structured_events:
+        if not event.get("start"):
+            continue
+        event["venue"] = venue_name
+        event["source_directory"] = "official_website"
+        event["source_type"] = "official_website"
+        event["url"] = event.get("url") or url
+    recurring = _recurring_events(parser, url, venue_name)
+    for event in recurring:
+        event["venue"] = venue_name
+        event["source_directory"] = "official_website"
+        event["source_type"] = "official_website"
+    return [event for event in structured_events + recurring if event.get("start")], None
+
+
+async def _enrich_venues_from_official_websites(session, venues):
+    """Enrich in parallel with a small concurrency limit; directory data remains fallback."""
+    semaphore = asyncio.Semaphore(5)
+
+    async def enrich(venue):
+        async with semaphore:
+            return venue, await _enrich_from_official_website(session, venue)
+
+    results = await asyncio.gather(*[
+        enrich(venue) for venue in venues if venue.get("official_website")
+    ], return_exceptions=True)
+    events, errors = [], []
+    for result in results:
+        if isinstance(result, Exception):
+            errors.append(f"Official website enrichment failed: {result}")
+            continue
+        venue, outcome = result
+        venue_events, error = outcome
+        events.extend(venue_events)
+        if error:
+            errors.append(error)
+    return events, errors
+
+
 async def async_collect(session, sources):
     venues_by_key, events_by_key, errors = {}, {}, []
     source_stats = []
@@ -599,6 +670,20 @@ async def async_collect(session, sources):
             "events_found": sum(1 for event in events_by_key.values() if event.get("source_directory") == source),
         })
 
+    # Official websites are the preferred source for explicit venue details.
+    # Keep directory-derived values as fallbacks when an official site publishes no value.
+    official_events, official_errors = await _enrich_venues_from_official_websites(
+        session, list(venues_by_key.values())
+    )
+    errors.extend(official_errors)
+    for event in official_events:
+        event_key = (
+            re.sub(r"[^a-z0-9]+", "", clean(event.get("summary")).lower()),
+            event.get("start"),
+            re.sub(r"[^a-z0-9]+", "", clean(event.get("venue")).lower()),
+        )
+        events_by_key[event_key] = event
+
     if not venues_by_key and not events_by_key and errors:
         raise RuntimeError("; ".join(errors))
     return {
@@ -615,6 +700,7 @@ async def async_collect(session, sources):
                 "url": event.get("url"),
                 "source_directory": event.get("source_directory"),
                 "recurring": event.get("recurring", False),
+                "source_type": event.get("source_type", "directory"),
             } for event in events_by_key.values()),
             key=lambda x: x["start"] or "",
         ),
