@@ -23,6 +23,7 @@ except (OSError, json.JSONDecodeError):
     OFFICIAL_WEBSITES = {}
 
 WEBSITE_ALIASES = {
+    "basement": "basementcomplexmanchester",
     "manticorespaplymouth": "manticore",
     "manticorespa": "manticore",
     "pleasuredromegaysaunalondon": "pleasuredrome",
@@ -33,6 +34,19 @@ WEBSITE_ALIASES = {
     "theboilerroomsauna": "theboilerroomhove",
     "lockerroomlondon": "lockerroomsaunalondon",
     "clubzeusmansfield": "clubzeussaunamansfield",
+    "dolphingaysaunanewbrightonmerseyside": "dolphinsaunanewbrighton",
+    "dolphin": "dolphinsaunanewbrighton",
+    "e15club": "e15clublondon",
+    "gentryspa": "gentryspahull",
+    "heroessauna": "heroessaunastourbridge",
+    "me1saunaandsteam": "me1saunarochester",
+    "number52sauna": "number52saunanewcastle",
+    "plasticivysauna": "plasticivysaunadewsbury",
+    "thepipeworksleeds": "pipeworksleeds",
+    "pipeworks": "pipeworksleeds",
+    "yumbo": "yumbobirmingham",
+    "greenhousesaunaluton": "greenhousesaunaluton",
+    "greenhousesaunadarlaston": "greenhousesaunadarlaston",
 }
 EVENT_WORDS = ("event", "night", "party", "session", "day", "special", "foam", "bear",
                "naked", "fetish", "discount", "social", "themed", "workout", "club")
