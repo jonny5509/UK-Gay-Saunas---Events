@@ -1,4 +1,4 @@
-"""Venue buttons expose a Google Maps URL and source listing."""
+"""Venue buttons expose map, official website, and source links."""
 from __future__ import annotations
 
 from urllib.parse import quote_plus
@@ -21,14 +21,16 @@ class VenueAddressButton(CoordinatorEntity, ButtonEntity):
         self._attr_extra_state_attributes = {
             "address": address or "Not extracted; Maps searches venue name",
             "google_maps_url": "https://www.google.com/maps/search/?api=1&query=" + quote_plus(query),
+            "official_website": venue.get("official_website", ""),
+            "description": venue.get("description", ""),
             "source_url": venue.get("url", ""),
             "source_directory": venue.get("source_directory", ""),
             "source_links": venue.get("source_links", []),
         }
 
     async def async_press(self):
-        # Home Assistant button entities do not open URLs themselves. The URL is
-        # exposed as an attribute for a Lovelace button-card tap_action (README).
+        # HA button entities do not open URLs themselves; attributes can be used
+        # in a Lovelace button-card tap_action.
         return
 
 async def async_setup_entry(hass, entry, async_add_entities):
