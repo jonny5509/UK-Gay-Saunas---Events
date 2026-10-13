@@ -320,7 +320,13 @@ async def async_collect(session, sources):
 
             enqueue(source, listing_parser.title or urlparse(source).netloc)
             for item in initial:
-                enqueue(item["url"], item["name"], False)
+                item_path = urlparse(item["url"]).path.rstrip("/")
+                # Venue cards are direct children of the selected regional directory.
+                # Ignore deeper pages such as event articles, tags, and general content.
+                if (item_path != source_path
+                        and urlparse(item["url"]).path.rstrip("/").rsplit("/", 1)[0] == source_path
+                        and not _is_region_or_directory_label(item["name"])):
+                    enqueue(item["url"], item["name"], False)
 
             while queue:
                 candidate = queue.pop(0)
@@ -343,7 +349,7 @@ async def async_collect(session, sources):
                         if key:
                             current = venues_by_key.get(key)
                             if current is None:
-                                venues_by_key[key] = place | {"sources": [source], "source_links": [place["url"]], "official_website": ""}
+                                venues_by_key[key] = {"name": place["name"], "url": place["url"]}
                                 current = venues_by_key[key]
                             else:
                                 if not current.get("address") and place.get("address"):
@@ -364,10 +370,6 @@ async def async_collect(session, sources):
                         if any(word in (label + " " + link_url).lower() for word in SKIP):
                             continue
                         if candidate.get("official") or any(word in label.lower() for word in ("official website", "visit website", "website", "web site")):
-                            key = re.sub(r"[^a-z0-9]+", "", venue_label.lower())
-                            if key in venues_by_key and not venues_by_key[key].get("official_website"):
-                                venues_by_key[key]["official_website"] = link_url
-                            enqueue(link_url, venue_label, True)
                     event_venue = next((p["name"] for p in found_places if p.get("name")), venue_label)
                     for event in found_events:
                         if not event.get("start"):
@@ -383,17 +385,7 @@ async def async_collect(session, sources):
                     key = re.sub(r"[^a-z0-9]+", "", label.lower())
                     if key and url != source and not _is_region_or_directory_label(label):
                         if key not in venues_by_key:
-                            venues_by_key[key] = {
-                                "name": label, "address": "", "url": url, "description": "",
-                                "source": source_host, "sources": [source], "source_links": [url],
-                                "official_website": url if candidate.get("official") else "",
-                            }
-                        else:
-                            venue = venues_by_key[key]
-                            if source not in venue.setdefault("sources", []):
-                                venue["sources"].append(source)
-                            if url not in venue.setdefault("source_links", []):
-                                venue["source_links"].append(url)
+                            venues_by_key[key] = {"name": label, "url": url}
                         source_venue_keys.add(key)
                     # Do not recursively enqueue links found on venue pages. That caused
                     # event articles, tag pages, and other nested pages to be mistaken for
@@ -416,7 +408,18 @@ async def async_collect(session, sources):
         raise RuntimeError("; ".join(errors))
     return {
         "venues": sorted(venues_by_key.values(), key=lambda x: x["name"].lower()),
-        "events": sorted(events_by_key.values(), key=lambda x: x["start"] or ""),
+        "events": sorted(
+            ({
+                "summary": event.get("summary"),
+                "start": event.get("start"),
+                "end": event.get("end"),
+                "location": event.get("location"),
+                "url": event.get("url"),
+                "source_directory": event.get("source_directory"),
+                "recurring": event.get("recurring", False),
+            } for event in events_by_key.values()),
+            key=lambda x: x["start"] or "",
+        ),
         "source_errors": errors,
         "source_stats": source_stats,
         "sources": sources,
