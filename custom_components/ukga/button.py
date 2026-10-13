@@ -1,6 +1,7 @@
 """Single button to notify all venue information and upcoming events."""
 from __future__ import annotations
 
+from datetime import datetime
 from urllib.parse import quote_plus
 
 from homeassistant.components import persistent_notification
@@ -26,7 +27,7 @@ class UKGAAllInformationButton(CoordinatorEntity, ButtonEntity):
         data = self.coordinator.data or {}
         venues = data.get("venues", [])
         events = data.get("events", [])
-        now = __import__("datetime").datetime.now().astimezone()
+        now = datetime.now().astimezone()
         sections = ["# UKGA — All sauna information", f"Venues found: {len(venues)}", ""]
 
         for venue in venues:
