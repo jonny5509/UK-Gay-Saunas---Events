@@ -272,11 +272,7 @@ def _candidate_links(parser, source_url):
         parsed = urlparse(url)
         host = parsed.netloc.lower().removeprefix("www.")
         name = clean(link["name"])
-        # Directory region cards (for example, "North East ... 2 venues") are not individual saunas.
-        if re.search(r"\b\d+\s+venues?\b", name, re.I):
-            continue
-        if re.match(r"^(?:north east|north west|south east|south west|east midlands|west midlands|east of england|west yorkshire|south yorkshire|east yorkshire|scotland|wales|northern ireland|england|london)\b", name, re.I):
-            continue
+        # Keep region links so we can follow them to individual venue pages.
         if parsed.scheme not in ("http", "https") or not host or not name or url in seen:
             continue
         if any(word in name.lower() for word in SKIP):
@@ -366,9 +362,14 @@ async def async_collect(session, sources):
                         }
                     if not candidate.get("official"):
                         for link in _candidate_links(parser, url):
-                            if link["host"] != base_host and (
-                                link["priority"] == 0 or any(x in link["name"].lower() for x in ("official", "website", "visit", "home"))
-                            ):
+                            # Follow internal directory links as well as official-site links.
+                            # Regional pages are navigation, not venues, but contain the venue cards we need.
+                            if link["host"] == base_host:
+                                link_path = urlparse(link["url"]).path.rstrip("/")
+                                current_path = urlparse(url).path.rstrip("/")
+                                if link_path and link_path != current_path and link_path.startswith(current_path + "/"):
+                                    queue.append({"url": link["url"], "name": link["name"], "directory": source, "official": False})
+                            elif link["priority"] == 0 or any(x in link["name"].lower() for x in ("official", "website", "visit", "home")):
                                 queue.append({"url": link["url"], "name": venue_label, "directory": source, "official": True})
                 except Exception as err:
                     if url == source:
