@@ -352,7 +352,9 @@ async def async_collect(session, sources):
                     for event in _recurring_events(parser, url, event_venue):
                         event["source_directory"] = source
                         events_by_key[(event["id"], event["start"])] = event
-                    label = candidate["name"]
+                    # Save the resolved page heading/title, not the directory card text.
+                    # The card text may be a regional label such as "London · 6 venues".
+                    label = venue_label
                     key = re.sub(r"[^a-z0-9]+", "", label.lower())
                     if key and url != source and not _is_region_or_directory_label(label) and key not in venues_by_key:
                         venues_by_key[key] = {
