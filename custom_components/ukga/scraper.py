@@ -572,6 +572,53 @@ async def async_collect(session, sources):
     except Exception as err:
         errors.append(f"{locker_room_url}: {err}")
 
+    # Explicitly include E15 Club London from its individual directory listing.
+    e15_url = "https://gaysaunas.co.uk/uk/england/london/e15-club-london/"
+    e15_name = "E15 Club London"
+    e15_key = "e15clublondon"
+    existing_e15_key = next((key for key, venue in venues_by_key.items()
+                             if "e15club" in re.sub(r"[^a-z0-9]+", "", venue.get("name", "").lower())), None)
+    if existing_e15_key:
+        e15 = venues_by_key.pop(existing_e15_key)
+        e15["name"] = e15_name
+        e15["url"] = e15_url
+        e15["source_links"] = list(dict.fromkeys([e15_url, *(e15.get("source_links") or [])]))
+        e15["sources"] = list(dict.fromkeys([*(e15.get("sources") or []), e15_url]))
+        e15["source_directory"] = e15_url
+        venues_by_key[e15_key] = e15
+    else:
+        venues_by_key[e15_key] = {
+            "name": e15_name,
+            "address": "6 Leytonstone Road, London, E15 1SE",
+            "url": e15_url,
+            "description": "E15 Club in Stratford, East London.",
+            "source": "gaysaunas.co.uk",
+            "sources": [e15_url],
+            "source_links": [e15_url],
+            "official_website": "",
+            "source_directory": e15_url,
+        }
+    try:
+        html = await _get(session, e15_url)
+        parser = PageParser(e15_url)
+        parser.feed(html)
+        found_events, found_places = _extract_structured(parser, e15_url)
+        for place in found_places:
+            if "e15club" in re.sub(r"[^a-z0-9]+", "", place.get("name", "").lower()):
+                venues_by_key[e15_key]["address"] = place.get("address") or venues_by_key[e15_key].get("address", "")
+                venues_by_key[e15_key]["description"] = place.get("description") or venues_by_key[e15_key].get("description", "")
+        for event in found_events:
+            if not event.get("start"):
+                continue
+            event["location"] = event.get("location") or e15_name
+            event["source_directory"] = e15_url
+            events_by_key[(event.get("id") or event["summary"], event["start"])] = event
+        for event in _recurring_events(parser, e15_url, e15_name):
+            event["source_directory"] = e15_url
+            events_by_key[(event["id"], event["start"])] = event
+    except Exception as err:
+        errors.append(f"{e15_url}: {err}")
+
     # Explicitly include Sailors Sauna London from its individual directory listing.
     sailors_url = "https://gaysaunas.co.uk/uk/england/london/sailors-sauna-london/"
     sailors_name = "Sailors Sauna London"
