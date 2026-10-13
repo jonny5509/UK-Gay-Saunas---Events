@@ -723,13 +723,26 @@ async def async_collect(session, sources):
         session, list(venues_by_key.values())
     )
     errors.extend(official_errors)
+    official_event_keys = set()
     for event in official_events:
         event_key = (
             re.sub(r"[^a-z0-9]+", "", clean(event.get("summary")).lower()),
             event.get("start"),
             re.sub(r"[^a-z0-9]+", "", clean(event.get("venue")).lower()),
         )
+        official_event_keys.add(event_key)
         events_by_key[event_key] = event
+    # When both sources describe the same event at the same time, retain the official-site version.
+    for existing_key, event in list(events_by_key.items()):
+        if event.get("source_type") == "official_website":
+            continue
+        comparable = (
+            re.sub(r"[^a-z0-9]+", "", clean(event.get("summary")).lower()),
+            event.get("start"),
+            re.sub(r"[^a-z0-9]+", "", clean(event.get("venue")).lower()),
+        )
+        if comparable in official_event_keys:
+            events_by_key.pop(existing_key, None)
 
     if not venues_by_key and not events_by_key and errors:
         raise RuntimeError("; ".join(errors))
