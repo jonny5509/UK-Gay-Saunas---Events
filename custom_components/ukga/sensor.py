@@ -63,6 +63,43 @@ def _event_matches_venue(event, venue):
     return False
 
 
+class UKGACrawlSummarySensor(CoordinatorEntity, SensorEntity):
+    """Expose per-region crawl counts to help verify directory coverage."""
+
+    _attr_has_entity_name = False
+    _attr_name = "UKGA directory crawl"
+    _attr_icon = "mdi:database-search"
+    _attr_native_unit_of_measurement = "venues"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_directory_crawl_summary"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name="UKGA Sauna Hub",
+            manufacturer="UK Gay Saunas & Events",
+            model="Sauna directory and events hub",
+        )
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data or {}
+        return len(data.get("venues", []))
+
+    @property
+    def extra_state_attributes(self):
+        data = self.coordinator.data or {}
+        return {
+            "regions": data.get("source_stats", []),
+            "source_errors": data.get("source_errors", []),
+            "total_pages_visited": sum(
+                item.get("pages_visited", 0) for item in data.get("source_stats", [])
+            ),
+            "total_events_found": len(data.get("events", [])),
+            "last_updated": data.get("last_updated"),
+        }
+
+
 class UKGAVenueNextEventSensor(CoordinatorEntity, SensorEntity):
     """Expose the next event matched to an individual sauna."""
 
@@ -120,6 +157,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     venues = (coordinator.data or {}).get("venues", [])
     async_add_entities([
-        UKGAVenueNextEventSensor(coordinator, entry.entry_id, venue, index)
-        for index, venue in enumerate(venues)
+        UKGACrawlSummarySensor(coordinator, entry.entry_id),
+        *[
+            UKGAVenueNextEventSensor(coordinator, entry.entry_id, venue, index)
+            for index, venue in enumerate(venues)
+        ],
     ])
