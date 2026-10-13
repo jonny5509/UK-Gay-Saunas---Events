@@ -23,7 +23,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_get_clientsession(hass)
-    sources = entry.data.get("sources", DEFAULT_SOURCES)
+    # Keep existing installations aligned with the fixed England regional directory list.
+    sources = list(DEFAULT_SOURCES)
+    if entry.data.get("sources") != sources:
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, "sources": sources}
+        )
 
     async def async_update_data():
         try:
