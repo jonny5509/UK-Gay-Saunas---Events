@@ -1,23 +1,25 @@
 # UKGA — UK Gay Saunas & Events for Home Assistant
 
-Custom Home Assistant integration intended for HACS. It reads two configurable directories:
+Custom Home Assistant integration intended for HACS. It starts with these directories and follows venue links, including links to official venue websites:
 
 - [misterb&b — UK Saunas & Cruising](https://www.misterbandb.com/gay-guide/united-kingdom/58-saunas-cruising)
 - [Gay Saunas UK](https://gaysaunas.co.uk/uk/)
 
 ## Features
 
-- Native Home Assistant calendar entity for events with explicit dates found in Schema.org JSON-LD on directory or linked pages.
-- One venue/listing button per extracted entry, exposing a Google Maps search URL and the source listing link.
-- Deduplicates listings by normalized name and combines source links where names match.
+- Crawls directory listings, linked venue pages, and likely official venue websites.
+- Native Home Assistant calendar entity for dated Schema.org events and published weekday schedules that can be interpreted as recurring events.
+- Creates upcoming calendar occurrences for detected weekly and ordinal monthly schedules.
+- Venue button attributes include address, Google Maps search URL, official website (when found), description, and source links.
+- Deduplicates event occurrences and venue listings where possible.
 - Refreshes every six hours.
-- Venue-count sensor with event count, refresh time, and source errors.
+- Venue-count sensor includes event count, refresh time, configured sources, and source-level errors.
 
-## Important limitations
+## Event extraction notes
 
-These websites are directories, not guaranteed structured event feeds. Events are added to the calendar only when a page exposes a parseable date in structured Schema.org event data. If an event is described only in prose (for example, "every Friday") this version does not guess future dates. The HTML parser is best-effort and may need updating if either site changes its markup. Addresses are filled when structured address data is present; otherwise the Maps button searches for the venue name.
+The scraper looks for structured event data and also attempts to interpret visible text schedules on linked pages (for example, a named event listed beside a weekday and hours). For weekly schedules it generates future occurrences for the next 13 weeks; for explicitly ordinal monthly schedules it generates the next several matching dates. If a page only says something vague such as "coming soon", has a JavaScript-only calendar, or blocks automated requests, dates may still be missing. Generated recurring dates are best-effort interpretations of published schedules, not a guarantee that a particular session has not been cancelled. Always check the venue's official website before travelling.
 
-Please verify event schedules and venue details with the source before travelling. This community integration is not affiliated with either directory and should respect their terms and rate limits.
+This is a general-purpose HTML scraper, not a bespoke adapter for every sauna website. Page layouts vary, and some external websites may block requests or load events dynamically. It may therefore miss details or occasionally interpret an ambiguous schedule incorrectly. Please review calendar entries and logs before relying on them.
 
 ## Install via HACS (custom repository)
 
@@ -33,23 +35,30 @@ Please verify event schedules and venue details with the source before travellin
 
 Add the created calendar entity to a Calendar dashboard card. The entity ID is typically `calendar.ukga_events`, but Home Assistant may adjust it to avoid a name conflict.
 
-## Get-address dashboard button
+## Venue website and address buttons
 
-A Home Assistant button entity cannot open a URL by itself. To make a dashboard button open Google Maps, install the community `button-card` frontend and use this example, replacing the entity ID with one created by your instance:
+Venue button entities expose `official_website`, `google_maps_url`, `address`, `description`, `source_url`, and `source_links` attributes. A Home Assistant button entity cannot open a URL by itself. To make a dashboard button open the official website, install the community `button-card` frontend and use this example, replacing the entity ID with one created by your instance:
 
 ```yaml
 type: custom:button-card
 entity: button.replace_with_venue_get_address
-name: Get address
-icon: mdi:map-marker
+name: Official website
+icon: mdi:web
+tap_action:
+  action: url
+  url: >
+    [[[ return entity.attributes.official_website || entity.attributes.source_url; ]]]
+```
+
+To open Google Maps instead, use this tap action:
+
+```yaml
 tap_action:
   action: url
   url: >
     [[[ return entity.attributes.google_maps_url; ]]]
 ```
 
-Each button also exposes `address`, `source_url`, `source_directory`, and `source_links` attributes.
-
 ## Development status
 
-Initial implementation. It has not been validated against every live page or Home Assistant release. Test in your installation and check logs before relying on it.
+This is a best-effort integration and has not been executed in a Home Assistant runtime or tested against every live source page in this change. Check Home Assistant logs and verify extracted events against venue websites. Respect source website terms and rate limits.
