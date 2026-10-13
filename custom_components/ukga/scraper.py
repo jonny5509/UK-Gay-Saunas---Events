@@ -24,6 +24,12 @@ except (OSError, json.JSONDecodeError):
 
 WEBSITE_ALIASES = {
     "basement": "basementcomplexmanchester",
+    "sweatbox": "sweatboxsoho",
+    "saunasauna": "saunasaunanorthwich",
+    "touchsauna": "touchsaunaswindon",
+    "splash": "splashspaleicester",
+    "w3complex": "w3saunablackpool",
+    "heroeshealthclub": "heroessaunastourbridge",
     "manticorespaplymouth": "manticore",
     "manticorespa": "manticore",
     "pleasuredromegaysaunalondon": "pleasuredrome",
