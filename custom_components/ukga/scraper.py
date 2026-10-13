@@ -216,18 +216,42 @@ def _extract_private_rooms(parser):
     return claims[0]
 
 def _extract_pricing(parser):
-    """Extract a concise price statement only when the page explicitly labels pricing."""
+    """Extract published venue prices from labelled text and structured offers."""
     text = clean(" ".join(parser.text))
-    patterns = (
-        r"(?:entry\s+(?:price|fee|cost)|prices?|pricing|admission|door\s+price|entrance\s+fee)\s*[:\-–]?\s*((?:£|GBP\s*)\s?\d+(?:\.\d{1,2})?(?:\s*(?:-|–|to)\s*(?:£\s?)?\d+(?:\.\d{1,2})?)?(?:\s*(?:per\s+(?:person|visit|session)|each))?)",
-        r"(?:entry\s+(?:price|fee|cost)|prices?|pricing|admission|door\s+price|entrance\s+fee)\s*[:\-–]?\s*([^.;]{1,100})",
+    # Prefer an explicitly labelled entry/admission/pricing section. Keep a short
+    # context so we don't mistake phone numbers, postcodes, or dates for prices.
+    labels = (
+        r"(?:entry|entrance|admission|door|day\s*pass|session|membership|"
+        r"prices?|pricing|costs?|fees?|tariff|offers?)"
     )
-    for pattern in patterns:
+    currency_price = r"(?:£\s?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\bGBP\s?\d{1,4}(?:\.\d{1,2})?)"
+    labelled_patterns = (
+        rf"{labels}\b[^.;]{{0,65}}?({currency_price}(?:\s*(?:-|–|—|to)\s*(?:£\s?)?\d{{1,4}}(?:\.\d{{1,2}})?)?(?:\s*(?:per\s+(?:person|visit|session|day)|each))?)",
+        rf"({currency_price}(?:\s*(?:-|–|—|to)\s*(?:£\s?)?\d{{1,4}}(?:\.\d{{1,2}})?)?)\s*[^.;]{{0,45}}\b(?:entry|entrance|admission|day\s*pass|session|per\s+person)\b",
+        r"\b(free\s+(?:entry|admission)|(?:entry|admission)\s+(?:is\s+)?free|no\s+entry\s+fee)\b",
+    )
+    for pattern in labelled_patterns:
         match = re.search(pattern, text, re.I)
         if match:
             value = clean(match.group(1)).strip(" :-–")
-            if value and re.search(r"£|\bGBP\b|\bfree\b|\d", value, re.I):
+            if value:
                 return value[:140]
+
+    # Some sites publish a compact price list without a heading immediately before
+    # every amount. Only accept a short run of prices when the page mentions pricing.
+    if re.search(r"\b(?:pricing|prices?|entry|admission|day\s*pass|tariff|fees?)\b", text, re.I):
+        excerpt_match = re.search(
+            r"\b(?:pricing|prices?|entry\s+(?:price|fee)|admission|day\s*pass|tariff|fees?)\b"
+            r"[^.;]{0,35}((?:£\s?\d{1,4}(?:\.\d{1,2})?(?:\s*(?:-|–|to)\s*£?\s?\d{1,4}(?:\.\d{1,2})?)?"
+            r"(?:\s*(?:,|/|or|and)\s*£?\s?\d{1,4}(?:\.\d{1,2})?)?)(?:[^.;]{0,25}))",
+            text, re.I,
+        )
+        if excerpt_match:
+            value = clean(excerpt_match.group(1)).strip(" :-–")
+            if value:
+                return value[:140]
+
+    # Schema.org offers are often present even when the visible price list is not.
     for raw in parser.scripts:
         try:
             data = json.loads(raw)
@@ -237,10 +261,19 @@ def _extract_pricing(parser):
             offers = obj.get("offers")
             if isinstance(offers, dict):
                 offers = [offers]
+            values = []
             for offer in offers or []:
-                if isinstance(offer, dict) and offer.get("price") is not None:
-                    currency = clean(offer.get("priceCurrency") or "GBP")
-                    return f"{currency} {offer['price']}"
+                if not isinstance(offer, dict) or offer.get("price") is None:
+                    continue
+                currency = clean(offer.get("priceCurrency") or "GBP")
+                values.append(f"{currency} {offer['price']}")
+            if values:
+                return ", ".join(dict.fromkeys(values))[:140]
+            # Product-like price ranges are occasionally published at the venue level.
+            low, high = obj.get("lowPrice"), obj.get("highPrice")
+            if low is not None and high is not None:
+                currency = clean(obj.get("priceCurrency") or "GBP")
+                return f"{currency} {low}–{high}"[:140]
     return None
 
 def _event_price(obj):
@@ -696,6 +729,8 @@ async def async_collect(session, sources):
                         pricing = _extract_pricing(parser)
                         if pricing:
                             venues_by_key[key]["pricing"] = pricing
+                            venues_by_key[key]["pricing_source"] = "directory"
+                            venues_by_key[key]["pricing_source_url"] = url
                         private_rooms = _extract_private_rooms(parser)
                         if private_rooms:
                             venues_by_key[key]["private_rooms"] = private_rooms
