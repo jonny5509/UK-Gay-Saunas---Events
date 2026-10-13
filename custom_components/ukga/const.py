@@ -13,4 +13,4 @@ DEFAULT_SOURCES = [
     "https://gaysaunas.co.uk/uk/england/south-yorkshire/",
     "https://gaysaunas.co.uk/uk/england/east-yorkshire/"
 ]
-SCAN_INTERVAL = 360
+SCAN_INTERVAL = 30
