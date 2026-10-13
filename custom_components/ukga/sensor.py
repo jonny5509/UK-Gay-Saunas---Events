@@ -296,7 +296,7 @@ class UKGAVenuePricingSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        return self._current_venue.get("pricing") or "Unknown"
+        return _safe_state_text(self._current_venue.get("pricing"), 250) if self._current_venue.get("pricing") else "Not published"
 
     @property
     def extra_state_attributes(self):
@@ -341,7 +341,7 @@ class UKGAVenuePrivateRoomsSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        return self._current_venue.get("private_rooms") or "Unknown"
+        return _safe_state_text(self._current_venue.get("private_rooms"), 250) if self._current_venue.get("private_rooms") else "Not specified"
 
     @property
     def extra_state_attributes(self):
@@ -385,7 +385,7 @@ class UKGAVenueWebsiteSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        return self._current_venue.get("official_website") or "Not found"
+        return _safe_state_text(self._current_venue.get("official_website"), 250) if self._current_venue.get("official_website") else "Not found"
 
     @property
     def extra_state_attributes(self):
