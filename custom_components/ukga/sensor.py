@@ -256,6 +256,51 @@ class UKGAVenueOpeningStatusSensor(CoordinatorEntity, SensorEntity):
         }
 
 
+
+class UKGAVenuePricingSensor(CoordinatorEntity, SensorEntity):
+    """Show venue pricing when explicitly published on the directory page."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Pricing"
+    _attr_icon = "mdi:cash"
+
+    def __init__(self, coordinator, entry_id, venue, index):
+        super().__init__(coordinator)
+        self._venue = venue
+        name = venue.get("name") or "Sauna"
+        slug = _normalise(name) or "sauna"
+        self._attr_unique_id = f"{entry_id}_{index}_{slug}_pricing"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
+            name=name,
+            manufacturer="UK Gay Saunas & Events",
+            via_device=(DOMAIN, entry_id),
+            configuration_url=venue.get("official_website") or venue.get("url"),
+        )
+
+    @property
+    def _current_venue(self):
+        venues = (self.coordinator.data or {}).get("venues", [])
+        return next(
+            (venue for venue in venues
+             if venue.get("url") == self._venue.get("url")
+             or venue.get("name") == self._venue.get("name")),
+            self._venue,
+        )
+
+    @property
+    def native_value(self):
+        return self._current_venue.get("pricing") or "Unknown"
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "sauna": self._current_venue.get("name"),
+            "source_url": self._current_venue.get("url"),
+            "pricing_basis": "Published directory-page information; may be unavailable or incomplete",
+        }
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     venues = (coordinator.data or {}).get("venues", [])
@@ -267,6 +312,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             for entity in (
                 UKGAVenueNextEventSensor(coordinator, entry.entry_id, venue, index),
                 UKGAVenueOpeningStatusSensor(coordinator, entry.entry_id, venue, index),
+                UKGAVenuePricingSensor(coordinator, entry.entry_id, venue, index),
             )
         ],
     ])
