@@ -229,7 +229,7 @@ class UKGAVenueOpeningStatusSensor(CoordinatorEntity, SensorEntity):
         minute = now.hour * 60 + now.minute
 
         for start, end in schedule.get(today, []):
-            if (start < end and start <= minute < end) or (start > end and (minute >= start or minute < end)):
+            if (start < end and start <= minute < end) or (start > end and minute >= start):
                 return "Open"
         # An overnight opening period belongs to the previous day's schedule.
         for start, end in schedule.get(yesterday, []):
