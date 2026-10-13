@@ -1,7 +1,7 @@
 """UK Gay Saunas directory and events integration."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 import hashlib
 
@@ -46,7 +46,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             events = data.get("events", [])
             venues = data.get("venues", [])
-            now = __import__("datetime").datetime.now().astimezone()
+            now = datetime.now().astimezone()
+            processed_event_keys = set()
             for event in events:
                 start = _event_start(event)
                 if not start or start < now:
@@ -60,7 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 # On the first crawl after startup, establish a baseline instead
                 # of sending a burst of notifications for existing listings.
                 if first_update:
-                    await favourite_store.async_mark_event_notified(event_key)
+                    processed_event_keys.add(event_key)
                     continue
                 for venue in venues:
                     if not favourite_store.notifications_enabled(venue):
@@ -79,7 +80,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         title=f"UKGA event — {name}",
                         notification_id=f"ukga_event_{event_key[:24]}",
                     )
-                await favourite_store.async_mark_event_notified(event_key)
+                processed_event_keys.add(event_key)
+            if processed_event_keys:
+                await favourite_store.async_mark_events_notified(processed_event_keys)
             first_update = False
             return data
         except Exception as err:
