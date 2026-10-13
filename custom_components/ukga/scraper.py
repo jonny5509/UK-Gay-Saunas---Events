@@ -7,7 +7,6 @@ import json
 import re
 from urllib.parse import urljoin, urlparse
 
-from .const import MAX_PAGES_PER_SOURCE
 
 HEADERS = {"User-Agent": "Home Assistant UKGA integration/0.2 (personal use)"}
 SKIP = ("privacy", "cookies", "contact", "about us", "terms", "login", "register",
@@ -287,23 +286,43 @@ def _candidate_links(parser, source_url):
             continue
         seen.add(url)
         candidates.append({"url": url, "name": name, "priority": priority, "host": host})
-    return sorted(candidates, key=lambda x: x["priority"])[:MAX_PAGES_PER_SOURCE]
+    return sorted(candidates, key=lambda x: x["priority"])
 
 async def async_collect(session, sources):
     venues_by_key, events_by_key, errors = {}, {}, []
+    source_stats = []
     for source in sources:
+        source_venue_keys = set()
+        pages_done = 0
         try:
             html = await _get(session, source)
             listing_parser = PageParser(source)
             listing_parser.feed(html)
+            source_path = urlparse(source).path.rstrip("/")
             initial = _candidate_links(listing_parser, source)
-            queue = [{"url": source, "name": listing_parser.title or urlparse(source).netloc,
-                      "directory": source, "official": False}]
-            queue.extend({"url": item["url"], "name": item["name"], "directory": source,
-                          "official": item["priority"] == 0 or item["host"] != urlparse(source).netloc.lower().removeprefix("www.")}
-                         for item in initial)
-            seen_pages, pages_done = set(), 0
-            while queue and pages_done < MAX_PAGES_PER_SOURCE * 3:
+            queue = []
+            queued_pages = set()
+            seen_pages = set()
+
+            def enqueue(url, name, official=False):
+                url = url.split("#", 1)[0]
+                path = urlparse(url).path.rstrip("/")
+                # Only crawl the selected region and its venue subpages, not the
+                # site's unrelated city guides, other regions, or general pages.
+                if urlparse(url).netloc.lower().removeprefix("www.") != urlparse(source).netloc.lower().removeprefix("www."):
+                    return
+                if path != source_path and not path.startswith(source_path + "/"):
+                    return
+                if url in queued_pages or url in seen_pages:
+                    return
+                queued_pages.add(url)
+                queue.append({"url": url, "name": name, "directory": source, "official": official})
+
+            enqueue(source, listing_parser.title or urlparse(source).netloc)
+            for item in initial:
+                enqueue(item["url"], item["name"], False)
+
+            while queue:
                 candidate = queue.pop(0)
                 url = candidate["url"].split("#", 1)[0]
                 if url in seen_pages:
@@ -325,11 +344,15 @@ async def async_collect(session, sources):
                             current = venues_by_key.get(key)
                             if current is None:
                                 venues_by_key[key] = place | {"sources": [source], "source_links": [place["url"]], "official_website": ""}
+                                current = venues_by_key[key]
                             else:
                                 if not current.get("address") and place.get("address"):
                                     current["address"] = place["address"]
-                                if place["url"] not in current["source_links"]:
+                                if source not in current.setdefault("sources", []):
+                                    current["sources"].append(source)
+                                if place["url"] not in current.setdefault("source_links", []):
                                     current["source_links"].append(place["url"])
+                            source_venue_keys.add(key)
                     base_host = urlparse(url).netloc.lower().removeprefix("www.")
                     for link in parser.links:
                         link_url = link["url"].split("#", 1)[0]
@@ -344,8 +367,7 @@ async def async_collect(session, sources):
                             key = re.sub(r"[^a-z0-9]+", "", venue_label.lower())
                             if key in venues_by_key and not venues_by_key[key].get("official_website"):
                                 venues_by_key[key]["official_website"] = link_url
-                            if len(queue) < MAX_PAGES_PER_SOURCE * 4:
-                                queue.append({"url": link_url, "name": venue_label, "directory": source, "official": True})
+                            enqueue(link_url, venue_label, True)
                     event_venue = next((p["name"] for p in found_places if p.get("name")), venue_label)
                     for event in found_events:
                         if not event.get("start"):
@@ -359,12 +381,20 @@ async def async_collect(session, sources):
                     # The card text may be a regional label such as "London · 6 venues".
                     label = venue_label
                     key = re.sub(r"[^a-z0-9]+", "", label.lower())
-                    if key and url != source and not _is_region_or_directory_label(label) and key not in venues_by_key:
-                        venues_by_key[key] = {
-                            "name": label, "address": "", "url": url, "description": "",
-                            "source": source_host, "sources": [source], "source_links": [url],
-                            "official_website": url if candidate.get("official") else "",
-                        }
+                    if key and url != source and not _is_region_or_directory_label(label):
+                        if key not in venues_by_key:
+                            venues_by_key[key] = {
+                                "name": label, "address": "", "url": url, "description": "",
+                                "source": source_host, "sources": [source], "source_links": [url],
+                                "official_website": url if candidate.get("official") else "",
+                            }
+                        else:
+                            venue = venues_by_key[key]
+                            if source not in venue.setdefault("sources", []):
+                                venue["sources"].append(source)
+                            if url not in venue.setdefault("source_links", []):
+                                venue["source_links"].append(url)
+                        source_venue_keys.add(key)
                     if not candidate.get("official"):
                         for link in _candidate_links(parser, url):
                             # Follow internal directory links as well as official-site links.
@@ -374,16 +404,22 @@ async def async_collect(session, sources):
                                 current_path = urlparse(url).path.rstrip("/")
                                 # The directory's venue pages may sit beside (not beneath) regional pages.
                                 if (link_path and link_path != current_path
-                                        and (link_path.startswith("/uk/") or link_path.startswith(current_path + "/"))):
-                                    queue.append({"url": link["url"], "name": link["name"], "directory": source, "official": False})
+                                        and (link_path == source_path or link_path.startswith(source_path + "/"))):
+                                    enqueue(link["url"], link["name"], False)
                             elif link["priority"] == 0 or any(x in link["name"].lower() for x in ("official", "website", "visit", "home")):
-                                queue.append({"url": link["url"], "name": venue_label, "directory": source, "official": True})
+                                enqueue(link["url"], venue_label, True)
                 except Exception as err:
                     if url == source:
                         errors.append(f"{source}: {err}")
                     continue
         except Exception as err:
             errors.append(f"{source}: {err}")
+        source_stats.append({
+            "source": source,
+            "pages_visited": pages_done,
+            "venues_found": len(source_venue_keys),
+            "events_found": sum(1 for event in events_by_key.values() if event.get("source_directory") == source),
+        })
 
     if not venues_by_key and not events_by_key and errors:
         raise RuntimeError("; ".join(errors))
@@ -391,6 +427,7 @@ async def async_collect(session, sources):
         "venues": sorted(venues_by_key.values(), key=lambda x: x["name"].lower()),
         "events": sorted(events_by_key.values(), key=lambda x: x["start"] or ""),
         "source_errors": errors,
+        "source_stats": source_stats,
         "sources": sources,
         "last_updated": datetime.now().astimezone().isoformat(),
     }
