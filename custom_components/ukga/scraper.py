@@ -382,6 +382,54 @@ async def async_collect(session, sources):
         except Exception as err:
             errors.append(f"{source}: {err}")
 
+    # Explicitly include the London Sweatbox listing requested by the repository owner.
+    # This guarantees it is represented even if directory crawling misses the venue card.
+    sweatbox_url = "https://gaysaunas.co.uk/uk/england/london/sweatbox-soho-london/"
+    sweatbox_name = "Sweatbox Soho London"
+    sweatbox_key = "sweatboxsoholondon"
+    existing_sweatbox_key = next((key for key, venue in venues_by_key.items()
+                                  if "sweatbox" in re.sub(r"[^a-z0-9]+", "", venue.get("name", "").lower())), None)
+    if existing_sweatbox_key:
+        sweatbox = venues_by_key.pop(existing_sweatbox_key)
+        sweatbox["name"] = sweatbox_name
+        sweatbox["url"] = sweatbox_url
+        sweatbox["source_links"] = list(dict.fromkeys([sweatbox_url, *(sweatbox.get("source_links") or [])]))
+        sweatbox["sources"] = list(dict.fromkeys([*(sweatbox.get("sources") or []), sweatbox_url]))
+        sweatbox["source_directory"] = sweatbox_url
+        venues_by_key[sweatbox_key] = sweatbox
+    else:
+        venues_by_key[sweatbox_key] = {
+            "name": sweatbox_name,
+            "address": "Ramillies House, 1–2 Ramillies Street, London, W1F 7LN",
+            "url": sweatbox_url,
+            "description": "Sweatbox Soho gay sauna and gym in London.",
+            "source": "gaysaunas.co.uk",
+            "sources": [sweatbox_url],
+            "source_links": [sweatbox_url],
+            "official_website": "",
+            "source_directory": sweatbox_url,
+        }
+    try:
+        html = await _get(session, sweatbox_url)
+        parser = PageParser(sweatbox_url)
+        parser.feed(html)
+        found_events, found_places = _extract_structured(parser, sweatbox_url)
+        for place in found_places:
+            if "sweatbox" in re.sub(r"[^a-z0-9]+", "", place.get("name", "").lower()):
+                venues_by_key[sweatbox_key]["address"] = place.get("address") or venues_by_key[sweatbox_key].get("address", "")
+                venues_by_key[sweatbox_key]["description"] = place.get("description") or venues_by_key[sweatbox_key].get("description", "")
+        for event in found_events:
+            if not event.get("start"):
+                continue
+            event["location"] = event.get("location") or sweatbox_name
+            event["source_directory"] = sweatbox_url
+            events_by_key[(event.get("id") or event["summary"], event["start"])] = event
+        for event in _recurring_events(parser, sweatbox_url, sweatbox_name):
+            event["source_directory"] = sweatbox_url
+            events_by_key[(event["id"], event["start"])] = event
+    except Exception as err:
+        errors.append(f"{sweatbox_url}: {err}")
+
     # Ensure Number 52 is represented even if a directory omits it or changes its links.
     # The official website is also scraped directly so published event information can be picked up.
     number52_url = "https://www.number52sauna.co.uk/"
