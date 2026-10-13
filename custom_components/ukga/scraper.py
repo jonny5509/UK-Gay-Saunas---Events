@@ -478,6 +478,53 @@ async def async_collect(session, sources):
     except Exception as err:
         errors.append(f"{pleasuredrome_url}: {err}")
 
+    # Explicitly include the Covent Garden Health Spa London listing.
+    covent_garden_url = "https://gaysaunas.co.uk/uk/england/london/covent-garden-health-spa-london/"
+    covent_garden_name = "Covent Garden Health Spa London"
+    covent_garden_key = "coventgardenhealthspalondon"
+    existing_covent_key = next((key for key, venue in venues_by_key.items()
+                                if "coventgardenhealthspa" in re.sub(r"[^a-z0-9]+", "", venue.get("name", "").lower())), None)
+    if existing_covent_key:
+        covent_garden = venues_by_key.pop(existing_covent_key)
+        covent_garden["name"] = covent_garden_name
+        covent_garden["url"] = covent_garden_url
+        covent_garden["source_links"] = list(dict.fromkeys([covent_garden_url, *(covent_garden.get("source_links") or [])]))
+        covent_garden["sources"] = list(dict.fromkeys([*(covent_garden.get("sources") or []), covent_garden_url]))
+        covent_garden["source_directory"] = covent_garden_url
+        venues_by_key[covent_garden_key] = covent_garden
+    else:
+        venues_by_key[covent_garden_key] = {
+            "name": covent_garden_name,
+            "address": "",
+            "url": covent_garden_url,
+            "description": "Covent Garden Health Spa in London.",
+            "source": "gaysaunas.co.uk",
+            "sources": [covent_garden_url],
+            "source_links": [covent_garden_url],
+            "official_website": "",
+            "source_directory": covent_garden_url,
+        }
+    try:
+        html = await _get(session, covent_garden_url)
+        parser = PageParser(covent_garden_url)
+        parser.feed(html)
+        found_events, found_places = _extract_structured(parser, covent_garden_url)
+        for place in found_places:
+            if "coventgardenhealthspa" in re.sub(r"[^a-z0-9]+", "", place.get("name", "").lower()):
+                venues_by_key[covent_garden_key]["address"] = place.get("address") or venues_by_key[covent_garden_key].get("address", "")
+                venues_by_key[covent_garden_key]["description"] = place.get("description") or venues_by_key[covent_garden_key].get("description", "")
+        for event in found_events:
+            if not event.get("start"):
+                continue
+            event["location"] = event.get("location") or covent_garden_name
+            event["source_directory"] = covent_garden_url
+            events_by_key[(event.get("id") or event["summary"], event["start"])] = event
+        for event in _recurring_events(parser, covent_garden_url, covent_garden_name):
+            event["source_directory"] = covent_garden_url
+            events_by_key[(event["id"], event["start"])] = event
+    except Exception as err:
+        errors.append(f"{covent_garden_url}: {err}")
+
     # Ensure Number 52 is represented even if a directory omits it or changes its links.
     # The official website is also scraped directly so published event information can be picked up.
     number52_url = "https://www.number52sauna.co.uk/"
