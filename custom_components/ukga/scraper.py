@@ -342,34 +342,7 @@ async def async_collect(session, sources):
                     found_events, found_places = _extract_structured(parser, url)
                     source_host = urlparse(source).netloc
                     venue_label = candidate["name"] if url == source else _venue_name_from_page(parser, candidate["name"])
-                    for place in found_places:
-                        place["source"] = source_host
-                        place["source_directory"] = source
-                        key = re.sub(r"[^a-z0-9]+", "", place["name"].lower())
-                        if key:
-                            current = venues_by_key.get(key)
-                            if current is None:
-                                venues_by_key[key] = {"name": place["name"], "url": place["url"]}
-                                current = venues_by_key[key]
-                            else:
-                                if not current.get("address") and place.get("address"):
-                                    current["address"] = place["address"]
-                                if source not in current.setdefault("sources", []):
-                                    current["sources"].append(source)
-                                if place["url"] not in current.setdefault("source_links", []):
-                                    current["source_links"].append(place["url"])
-                            source_venue_keys.add(key)
-                    base_host = urlparse(url).netloc.lower().removeprefix("www.")
-                    for link in parser.links:
-                        link_url = link["url"].split("#", 1)[0]
-                        parsed = urlparse(link_url)
-                        host = parsed.netloc.lower().removeprefix("www.")
-                        label = clean(link["name"])
-                        if parsed.scheme not in ("http", "https") or not host or host != urlparse(source).netloc.lower().removeprefix("www."):
-                            continue
-                        if any(word in (label + " " + link_url).lower() for word in SKIP):
-                            continue
-                        if candidate.get("official") or any(word in label.lower() for word in ("official website", "visit website", "website", "web site")):
+                    # Venue records are intentionally limited to name and source page URL.
                     event_venue = next((p["name"] for p in found_places if p.get("name")), venue_label)
                     for event in found_events:
                         if not event.get("start"):
