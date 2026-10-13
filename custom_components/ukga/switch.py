@@ -59,12 +59,41 @@ class UKGAVenueFavouriteSwitch(CoordinatorEntity, SwitchEntity):
         self.coordinator.async_update_listeners()
 
 
+class UKGAVenueNotificationsSwitch(UKGAVenueFavouriteSwitch):
+    """Toggle event notifications for a venue."""
+
+    _attr_name = "Notifications"
+    _attr_icon = "mdi:bell-ring"
+
+    def __init__(self, coordinator, entry_id, venue, index, favourite_store):
+        super().__init__(coordinator, entry_id, venue, index, favourite_store)
+        name = venue.get("name") or "Sauna"
+        slug = "".join(char for char in name.lower() if char.isalnum()) or "sauna"
+        self._attr_unique_id = f"{entry_id}_{index}_{slug}_notifications"
+
+    @property
+    def is_on(self):
+        return self._favourite_store.notifications_enabled(self._current_venue)
+
+    async def async_turn_on(self, **kwargs):
+        await self._favourite_store.async_set_notifications(self._current_venue, True)
+        self.coordinator.async_update_listeners()
+
+    async def async_turn_off(self, **kwargs):
+        await self._favourite_store.async_set_notifications(self._current_venue, False)
+        self.coordinator.async_update_listeners()
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up one favourite switch per sauna."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     favourite_store = hass.data[DOMAIN][entry.entry_id + "_favourites"]
     venues = (coordinator.data or {}).get("venues", [])
     async_add_entities([
-        UKGAVenueFavouriteSwitch(coordinator, entry.entry_id, venue, index, favourite_store)
+        entity
         for index, venue in enumerate(venues)
+        for entity in (
+            UKGAVenueFavouriteSwitch(coordinator, entry.entry_id, venue, index, favourite_store),
+            UKGAVenueNotificationsSwitch(coordinator, entry.entry_id, venue, index, favourite_store),
+        )
     ])
