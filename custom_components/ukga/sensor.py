@@ -118,7 +118,6 @@ class UKGAVenueNextEventSensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
             name=name,
             manufacturer="UK Gay Saunas & Events",
-            via_device=(DOMAIN, entry_id),
             configuration_url=venue.get("official_website") or venue.get("url"),
         )
 
@@ -172,7 +171,6 @@ class UKGAVenueOpeningStatusSensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
             name=name,
             manufacturer="UK Gay Saunas & Events",
-            via_device=(DOMAIN, entry_id),
             configuration_url=venue.get("official_website") or venue.get("url"),
         )
 
@@ -276,7 +274,6 @@ class UKGAVenuePricingSensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
             name=name,
             manufacturer="UK Gay Saunas & Events",
-            via_device=(DOMAIN, entry_id),
             configuration_url=venue.get("official_website") or venue.get("url"),
         )
 
@@ -322,7 +319,6 @@ class UKGAVenuePrivateRoomsSensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
             name=name,
             manufacturer="UK Gay Saunas & Events",
-            via_device=(DOMAIN, entry_id),
             configuration_url=venue.get("official_website") or venue.get("url"),
         )
 
@@ -367,7 +363,6 @@ class UKGAVenueWebsiteSensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
             name=name,
             manufacturer="UK Gay Saunas & Events",
-            via_device=(DOMAIN, entry_id),
             configuration_url=venue.get("official_website") or venue.get("url"),
         )
 
