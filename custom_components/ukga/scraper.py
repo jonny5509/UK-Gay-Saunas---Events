@@ -397,14 +397,22 @@ def _extract_structured(parser, page_url):
         for obj in _iter_jsonld(data):
             types = _types(obj)
             if any(t == "event" or t.endswith("event") for t in types):
+                summary = clean(obj.get("name") or "Sauna event")
+                # Wix and other site builders can embed enormous configuration objects;
+                # do not mistake those blobs for human-readable event titles.
+                if (len(summary) > 250 or summary.startswith(("{", "[")) or
+                        any(marker in summary.lower() for marker in (
+                            "sitefeaturesconfigs", "businessphone", "userpatterns"
+                        ))):
+                    continue
                 start = _date(obj.get("startDate"))
                 end = _date(obj.get("endDate")) or start
                 loc = obj.get("location", {})
                 loc_name = loc.get("name", "") if isinstance(loc, dict) else ""
                 loc_addr = _address(loc) if isinstance(loc, dict) else ""
                 events.append({
-                    "id": clean(obj.get("@id") or obj.get("url") or f"{page_url}#{clean(obj.get('name'))}"),
-                    "summary": clean(obj.get("name") or "Sauna event"), "start": start, "end": end,
+                    "id": clean(obj.get("@id") or obj.get("url") or f"{page_url}#{summary}"),
+                    "summary": summary, "start": start, "end": end,
                     "description": clean(obj.get("description", "")),
                     "price": _event_price(obj),
                     "location": loc_addr or clean(loc_name),
