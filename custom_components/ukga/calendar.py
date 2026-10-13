@@ -78,6 +78,9 @@ class UKGAEventsCalendar(CoordinatorEntity, CalendarEntity):
                 continue
             if not end or end < start:
                 end = start
+            # Hide events that have already finished from calendar views.
+            if end < dt_util.now():
+                continue
             if start < end_date and end >= start_date:
                 results.append(_calendar_event(item, start, end))
         return sorted(results, key=lambda item: item.start)
