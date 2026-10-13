@@ -59,9 +59,9 @@ class FavouriteStore:
             self.notification_venues.discard(key)
         await self._async_save()
 
-    async def async_mark_event_notified(self, event_key: str) -> None:
-        """Remember an event so it cannot repeatedly trigger notifications."""
-        self.notified_events.add(event_key)
+    async def async_mark_events_notified(self, event_keys) -> None:
+        """Remember events so they cannot repeatedly trigger notifications."""
+        self.notified_events.update(event_keys)
         # Keep storage bounded while preserving recent event fingerprints.
         self.notified_events = set(sorted(self.notified_events)[-1500:])
         await self._async_save()
