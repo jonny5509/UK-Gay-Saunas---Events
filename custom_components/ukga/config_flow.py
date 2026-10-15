@@ -14,7 +14,7 @@ def _parse_sources(user_input):
     """Collect up to 15 optional webpage URLs and validate each one."""
     sources = []
     for index in range(1, 16):
-        value = str(user_input.get(f"source_{index}", "") or "").strip()
+        value = str(user_input.get(f"Webpage {index}", "") or "").strip()
         if not value:
             continue
         parsed = urlparse(value)
@@ -49,7 +49,7 @@ class UKGAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         for index in range(1, 16):
             default = DEFAULT_SOURCES[index - 1] if index <= len(DEFAULT_SOURCES) else ""
             schema[vol.Optional(
-                f"source_{index}",
+                f"Webpage {index}",
                 default=default,
             )] = selector.TextSelector(
                 selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
