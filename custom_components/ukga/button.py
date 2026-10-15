@@ -9,6 +9,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .favourites import venue_key, venue_id
 from .sensor import _event_matches_venue, _event_start
 
 
@@ -24,9 +25,9 @@ class UKGAVenueInformationButton(CoordinatorEntity, ButtonEntity):
         name = venue.get("name") or "Sauna"
         slug = "".join(c for c in name.lower() if c.isalnum()) or "sauna"
         self._attr_name = f"{name} information"
-        self._attr_unique_id = f"{entry_id}_{index}_{slug}_information"
+        self._attr_unique_id = f"{entry_id}_{venue_id(venue)}_information"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
+            identifiers={(DOMAIN, f"{entry_id}_sauna_{venue_id(venue)}")},
             name=name,
             manufacturer="UK Gay Saunas & Events",
             configuration_url=venue.get("official_website") or venue.get("url"),
@@ -73,10 +74,24 @@ class UKGAVenueInformationButton(CoordinatorEntity, ButtonEntity):
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    """Set up one information button for each sauna."""
+    """Set up information buttons, including venues discovered on later refreshes."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     venues = (coordinator.data or {}).get("venues", [])
+    known = {venue_key(venue) for venue in venues}
     async_add_entities([
         UKGAVenueInformationButton(coordinator, entry.entry_id, venue, index)
         for index, venue in enumerate(venues)
     ])
+
+    def _add_new_venues():
+        new_entities = []
+        for index, venue in enumerate((coordinator.data or {}).get("venues", [])):
+            key = venue_key(venue)
+            if key in known:
+                continue
+            known.add(key)
+            new_entities.append(UKGAVenueInformationButton(coordinator, entry.entry_id, venue, index))
+        if new_entities:
+            async_add_entities(new_entities)
+
+    entry.async_on_unload(coordinator.async_add_listener(_add_new_venues))
