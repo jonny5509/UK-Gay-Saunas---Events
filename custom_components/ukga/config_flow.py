@@ -44,7 +44,9 @@ class UKGAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
-                vol.Required("sources", default="\n".join(DEFAULT_SOURCES)): selector.TextSelector(\n                    selector.TextSelectorConfig(multiline=True)\n                ),
+                vol.Required("sources", default="\n".join(DEFAULT_SOURCES)): selector.TextSelector(
+                    selector.TextSelectorConfig(multiline=True)
+                ),
             }),
             errors=errors,
             description_placeholders={
