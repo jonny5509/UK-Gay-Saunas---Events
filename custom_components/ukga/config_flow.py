@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.helpers import selector
 
 from .const import DOMAIN, DEFAULT_SOURCES
 
@@ -43,7 +44,7 @@ class UKGAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
-                vol.Required("sources", default="\n".join(DEFAULT_SOURCES)): str,
+                vol.Required("sources", default="\n".join(DEFAULT_SOURCES)): selector.TextSelector(\n                    selector.TextSelectorConfig(multiline=True)\n                ),
             }),
             errors=errors,
             description_placeholders={
