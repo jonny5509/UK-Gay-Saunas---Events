@@ -708,6 +708,7 @@ def _number52_schedule_fallback(page_url, venue_name):
                     "end": end_dt.isoformat(),
                     "description": "Inferred from the published recurring schedule. Confirm the date with Number 52 before travelling.",
                     "location": venue_name,
+                    "venue": venue_name,
                     "url": page_url,
                     "recurring": True,
                     "source_type": "official_website_inferred",
