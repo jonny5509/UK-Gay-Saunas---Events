@@ -1,6 +1,8 @@
 """Persistent favourites and venue notification preferences for UKGA."""
 from __future__ import annotations
 
+import hashlib
+
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
@@ -13,6 +15,11 @@ def venue_key(venue: dict) -> str:
         return url.lower()
     name = str(venue.get("name") or "unknown").strip().lower()
     return f"name:{name}"
+
+
+def venue_id(venue: dict) -> str:
+    """Return a compact, stable identifier independent of directory ordering."""
+    return hashlib.sha256(venue_key(venue).encode("utf-8")).hexdigest()[:16]
 
 
 class FavouriteStore:
