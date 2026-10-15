@@ -9,7 +9,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .favourites import venue_key, venue_id
+from .favourites import venue_key, venue_id, migrate_legacy_venue_entities
 from .sensor import _event_matches_venue, _event_start
 
 
@@ -78,6 +78,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     venues = (coordinator.data or {}).get("venues", [])
     known = {venue_key(venue) for venue in venues}
+    migrate_legacy_venue_entities(hass, entry, venues, "button", ("information",))
     async_add_entities([
         UKGAVenueInformationButton(coordinator, entry.entry_id, venue, index)
         for index, venue in enumerate(venues)
