@@ -1,7 +1,7 @@
 """UK Gay Saunas directory and events integration."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 import logging
 import hashlib
 
@@ -11,6 +11,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import async_get as async_get_device_registry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.components import persistent_notification
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, DEFAULT_SOURCES, SCAN_INTERVAL
 from .scraper import async_collect
@@ -26,8 +27,18 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_get_clientsession(hass)
-    # Keep existing installations aligned with the fixed England regional directory list.
-    sources = list(DEFAULT_SOURCES)
+    # Preserve configured sources on existing installs; use defaults for older entries.
+    configured_sources = entry.data.get("sources", DEFAULT_SOURCES)
+    if isinstance(configured_sources, str):
+        configured_sources = configured_sources.splitlines()
+    if not isinstance(configured_sources, (list, tuple)):
+        configured_sources = DEFAULT_SOURCES
+    sources = [
+        value.strip() for value in configured_sources
+        if isinstance(value, str) and value.strip().startswith("https://")
+    ]
+    if not sources:
+        sources = list(DEFAULT_SOURCES)
     if entry.data.get("sources") != sources:
         hass.config_entries.async_update_entry(
             entry, data={**entry.data, "sources": sources}
@@ -44,7 +55,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             events = data.get("events", [])
             venues = data.get("venues", [])
-            now = datetime.now().astimezone()
+            now = dt_util.now()
             reminder_deadline = now + timedelta(hours=24)
             processed_event_keys = set()
             for event in events:

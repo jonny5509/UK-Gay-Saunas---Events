@@ -648,6 +648,12 @@ def _official_related_pages(parser, base_url):
                 "facilities", "private", "room", "event", "whatson", "what-s-on", "calendar",
                 "visit", "sauna")
     selected, seen = [], {base_url.rstrip("/")}
+    # Number 52's event page is sometimes absent from the homepage's link markup.
+    if base_host == "number52sauna.co.uk":
+        number52_events_url = "https://www.number52sauna.co.uk/our-events/"
+        if number52_events_url.rstrip("/") not in seen:
+            selected.append(number52_events_url)
+            seen.add(number52_events_url.rstrip("/"))
     # W3 publishes its recurring and themed sessions on this dedicated events page.
     if base.netloc.lower().removeprefix("www.") == "w3sauna.co.uk":
         w3_events_url = "https://www.w3sauna.co.uk/events.html"
@@ -670,6 +676,44 @@ def _official_related_pages(parser, base_url):
         if len(selected) >= 10:
             break
     return selected
+
+
+def _number52_schedule_fallback(page_url, venue_name):
+    """Build cautious future occurrences for Number 52's publicly listed Thursday nights.
+
+    The official landing page sometimes omits the event details from returned HTML.
+    These inferred occurrences are explicitly labelled as a published recurring
+    schedule, not represented as individually confirmed dated events.
+    """
+    today = date.today()
+    schedule = (("Fetish Night", (1, 3)), ("Sports/Chav Night", (2, 4)))
+    events = []
+    for title, ordinals in schedule:
+        for month_offset in range(7):
+            month_index = today.month - 1 + month_offset
+            year = today.year + month_index // 12
+            month = month_index % 12 + 1
+            first = date(year, month, 1)
+            first_thursday = first + timedelta(days=(3 - first.weekday()) % 7)
+            for ordinal in ordinals:
+                occurrence = first_thursday + timedelta(days=7 * (ordinal - 1))
+                if occurrence < today:
+                    continue
+                start_dt = datetime.combine(occurrence, time(18, 0)).astimezone()
+                end_dt = datetime.combine(occurrence, time(22, 0)).astimezone()
+                events.append({
+                    "id": f"{page_url}#{title.lower().replace('/', '-').replace(' ', '-')}-{occurrence.isoformat()}",
+                    "summary": title,
+                    "start": start_dt.isoformat(),
+                    "end": end_dt.isoformat(),
+                    "description": "Inferred from the published recurring schedule. Confirm the date with Number 52 before travelling.",
+                    "location": venue_name,
+                    "venue": venue_name,
+                    "url": page_url,
+                    "recurring": True,
+                    "source_type": "official_website_inferred",
+                })
+    return events
 
 
 async def _enrich_from_official_website(session, venue):
@@ -736,6 +780,15 @@ async def _enrich_from_official_website(session, venue):
             event["source_directory"] = "official_website"
             event["source_type"] = "official_website"
             events.append(event)
+    # The Number 52 event landing page can return a generic shell without event
+    # dates. Use only its known published recurring Thursday schedule as fallback.
+    if urlparse(url).netloc.lower().removeprefix("www.") == "number52sauna.co.uk" and not events:
+        events = _number52_schedule_fallback(
+            "https://www.number52sauna.co.uk/our-events/", venue_name
+        )
+        for event in events:
+            event["venue"] = venue_name
+            event["source_directory"] = "official_website"
     return events, None
 
 
