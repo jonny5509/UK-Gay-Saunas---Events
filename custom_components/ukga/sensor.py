@@ -10,7 +10,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN
-from .favourites import venue_key, venue_id
+from .favourites import venue_key, venue_id, migrate_legacy_venue_entities
 
 
 def _event_start(event):
@@ -491,6 +491,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     favourite_store = hass.data[DOMAIN][entry.entry_id + "_favourites"]
     venues = (coordinator.data or {}).get("venues", [])
     known = {venue_key(venue) for venue in venues}
+    migrate_legacy_venue_entities(
+        hass, entry, venues, "sensor",
+        ("next_event", "opening_status", "pricing", "private_rooms", "official_website"),
+    )
 
     async_add_entities([
         UKGACrawlSummarySensor(coordinator, entry.entry_id),
