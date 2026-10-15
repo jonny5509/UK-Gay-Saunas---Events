@@ -1,4 +1,4 @@
-"""UI configuration flow for the source directories."""
+"""UI configuration flow for the source webpages."""
 from __future__ import annotations
 
 from urllib.parse import urlparse
@@ -10,17 +10,20 @@ from homeassistant.helpers import selector
 from .const import DOMAIN, DEFAULT_SOURCES
 
 
-def _parse_sources(value):
-    """Parse newline-separated source URLs and reject malformed input."""
-    sources = list(dict.fromkeys(
-        line.strip() for line in str(value or "").splitlines() if line.strip()
-    ))
+def _parse_sources(user_input):
+    """Collect up to 15 optional webpage URLs and validate each one."""
+    sources = []
+    for index in range(1, 16):
+        value = str(user_input.get(f"source_{index}", "") or "").strip()
+        if not value:
+            continue
+        parsed = urlparse(value)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise vol.Invalid(f"Not a valid HTTPS URL: {value}")
+        if value not in sources:
+            sources.append(value)
     if not sources:
         raise vol.Invalid("Enter at least one source URL.")
-    for source in sources:
-        parsed = urlparse(source)
-        if parsed.scheme != "https" or not parsed.netloc:
-            raise vol.Invalid(f"Not a valid HTTPS URL: {source}")
     return sources
 
 
@@ -31,9 +34,9 @@ class UKGAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
         if user_input is not None:
             try:
-                sources = _parse_sources(user_input["sources"])
+                sources = _parse_sources(user_input)
             except vol.Invalid:
-                errors["sources"] = "invalid_sources"
+                errors["base"] = "invalid_sources"
             else:
                 await self.async_set_unique_id(DOMAIN)
                 self._abort_if_unique_id_configured()
@@ -41,15 +44,22 @@ class UKGAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     title="UK Gay Saunas & Events",
                     data={"sources": sources},
                 )
+
+        schema = {}
+        for index in range(1, 16):
+            default = DEFAULT_SOURCES[index - 1] if index <= len(DEFAULT_SOURCES) else ""
+            schema[vol.Optional(
+                f"source_{index}",
+                default=default,
+            )] = selector.TextSelector(
+                selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
+            )
+
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({
-                vol.Required("sources", default="\n".join(DEFAULT_SOURCES)): selector.TextSelector(
-                    selector.TextSelectorConfig(multiline=True)
-                ),
-            }),
+            data_schema=vol.Schema(schema),
             errors=errors,
             description_placeholders={
-                "source_help": "Enter one HTTPS directory URL per line."
+                "source_help": "Enter up to 15 HTTPS webpage URLs. Leave unused boxes blank."
             },
         )
