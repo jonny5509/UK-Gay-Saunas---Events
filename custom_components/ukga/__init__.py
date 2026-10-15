@@ -1,7 +1,7 @@
 """UK Gay Saunas directory and events integration."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 import logging
 import hashlib
 
@@ -31,6 +31,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     configured_sources = entry.data.get("sources", DEFAULT_SOURCES)
     if isinstance(configured_sources, str):
         configured_sources = configured_sources.splitlines()
+    if not isinstance(configured_sources, (list, tuple)):
+        configured_sources = DEFAULT_SOURCES
     sources = [
         value.strip() for value in configured_sources
         if isinstance(value, str) and value.strip().startswith("https://")
