@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .favourites import venue_key, venue_id, migrate_legacy_venue_entities
@@ -20,7 +21,9 @@ def _event_start(event):
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         if parsed.tzinfo is None:
-            parsed = parsed.astimezone()
+            parsed = dt_util.as_local(parsed)
+        else:
+            parsed = dt_util.as_local(parsed)
         return parsed
     except (TypeError, ValueError):
         return None
@@ -40,11 +43,23 @@ def _safe_state_text(value, limit=250):
 def _event_matches_venue(event, venue):
     """Match events to a venue using names, locations, and known venue URLs."""
     venue_name = _normalise(venue.get("name"))
+    # The scraper explicitly tags events with the venue they came from. Prefer
+    # that association before trying less reliable location text or URL paths.
+    event_venue = _normalise(event.get("venue"))
     location = _normalise(event.get("location"))
-    if venue_name and location and (
-        venue_name in location or (len(location) >= 8 and location in venue_name)
-    ):
-        return True
+    for candidate in (event_venue, location):
+        if venue_name and candidate and (
+            venue_name in candidate or (len(candidate) >= 8 and candidate in venue_name)
+        ):
+            return True
+
+    # Events scraped from a venue's official site may use /events/... URLs while
+    # the venue record stores only the homepage URL. Match the official hostname.
+    if event.get("source_type") == "official_website":
+        event_host = urlparse(str(event.get("url") or "")).netloc.lower().removeprefix("www.")
+        official_host = urlparse(str(venue.get("official_website") or "")).netloc.lower().removeprefix("www.")
+        if event_host and official_host and event_host == official_host:
+            return True
 
     event_url = str(event.get("url") or "").rstrip("/")
     if event_url:
