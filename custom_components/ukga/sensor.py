@@ -10,7 +10,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN
-from .favourites import venue_key
+from .favourites import venue_key, venue_id
 
 
 def _event_start(event):
@@ -120,9 +120,9 @@ class UKGAVenueNextEventSensor(CoordinatorEntity, SensorEntity):
         name = venue.get("name") or "Sauna"
         slug = _normalise(name) or "sauna"
         self._attr_name = f"{name} next event"
-        self._attr_unique_id = f"{entry_id}_{index}_{slug}_next_event"
+        self._attr_unique_id = f"{entry_id}_{venue_id(venue)}_next_event"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
+            identifiers={(DOMAIN, f"{entry_id}_sauna_{venue_id(venue)}")},
             name=name,
             manufacturer="UK Gay Saunas & Events",
             configuration_url=venue.get("official_website") or venue.get("url"),
@@ -173,9 +173,9 @@ class UKGAVenueOpeningStatusSensor(CoordinatorEntity, SensorEntity):
         self._venue = venue
         name = venue.get("name") or "Sauna"
         slug = _normalise(name) or "sauna"
-        self._attr_unique_id = f"{entry_id}_{index}_{slug}_opening_status"
+        self._attr_unique_id = f"{entry_id}_{venue_id(venue)}_opening_status"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
+            identifiers={(DOMAIN, f"{entry_id}_sauna_{venue_id(venue)}")},
             name=name,
             manufacturer="UK Gay Saunas & Events",
             configuration_url=venue.get("official_website") or venue.get("url"),
@@ -276,9 +276,9 @@ class UKGAVenuePricingSensor(CoordinatorEntity, SensorEntity):
         self._venue = venue
         name = venue.get("name") or "Sauna"
         slug = _normalise(name) or "sauna"
-        self._attr_unique_id = f"{entry_id}_{index}_{slug}_pricing"
+        self._attr_unique_id = f"{entry_id}_{venue_id(venue)}_pricing"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
+            identifiers={(DOMAIN, f"{entry_id}_sauna_{venue_id(venue)}")},
             name=name,
             manufacturer="UK Gay Saunas & Events",
             configuration_url=venue.get("official_website") or venue.get("url"),
@@ -321,9 +321,9 @@ class UKGAVenuePrivateRoomsSensor(CoordinatorEntity, SensorEntity):
         self._venue = venue
         name = venue.get("name") or "Sauna"
         slug = _normalise(name) or "sauna"
-        self._attr_unique_id = f"{entry_id}_{index}_{slug}_private_rooms"
+        self._attr_unique_id = f"{entry_id}_{venue_id(venue)}_private_rooms"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
+            identifiers={(DOMAIN, f"{entry_id}_sauna_{venue_id(venue)}")},
             name=name,
             manufacturer="UK Gay Saunas & Events",
             configuration_url=venue.get("official_website") or venue.get("url"),
@@ -365,9 +365,9 @@ class UKGAVenueWebsiteSensor(CoordinatorEntity, SensorEntity):
         self._venue = venue
         name = venue.get("name") or "Sauna"
         slug = _normalise(name) or "sauna"
-        self._attr_unique_id = f"{entry_id}_{index}_{slug}_official_website"
+        self._attr_unique_id = f"{entry_id}_{venue_id(venue)}_official_website"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{entry_id}_sauna_{index}_{slug}")},
+            identifiers={(DOMAIN, f"{entry_id}_sauna_{venue_id(venue)}")},
             name=name,
             manufacturer="UK Gay Saunas & Events",
             configuration_url=venue.get("official_website") or venue.get("url"),
@@ -488,8 +488,10 @@ class UKGANotificationSubscriptionsSensor(CoordinatorEntity, SensorEntity):
 
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    venues = (coordinator.data or {}).get("venues", [])
     favourite_store = hass.data[DOMAIN][entry.entry_id + "_favourites"]
+    venues = (coordinator.data or {}).get("venues", [])
+    known = {venue_key(venue) for venue in venues}
+
     async_add_entities([
         UKGACrawlSummarySensor(coordinator, entry.entry_id),
         UKGAFavouritesSensor(coordinator, entry.entry_id, favourite_store),
@@ -506,3 +508,22 @@ async def async_setup_entry(hass, entry, async_add_entities):
             )
         ],
     ])
+
+    def _add_new_venues():
+        new_entities = []
+        for index, venue in enumerate((coordinator.data or {}).get("venues", [])):
+            key = venue_key(venue)
+            if key in known:
+                continue
+            known.add(key)
+            new_entities.extend((
+                UKGAVenueNextEventSensor(coordinator, entry.entry_id, venue, index),
+                UKGAVenueOpeningStatusSensor(coordinator, entry.entry_id, venue, index),
+                UKGAVenuePricingSensor(coordinator, entry.entry_id, venue, index),
+                UKGAVenuePrivateRoomsSensor(coordinator, entry.entry_id, venue, index),
+                UKGAVenueWebsiteSensor(coordinator, entry.entry_id, venue, index),
+            ))
+        if new_entities:
+            async_add_entities(new_entities)
+
+    entry.async_on_unload(coordinator.async_add_listener(_add_new_venues))
