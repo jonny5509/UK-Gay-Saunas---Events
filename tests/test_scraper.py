@@ -1,12 +1,19 @@
 from datetime import date, datetime
+import importlib.util
 import json
+from pathlib import Path
 
-from custom_components.ukga.scraper import (
-    PageParser,
-    _date,
-    _extract_structured,
-    _number52_schedule_fallback,
-)
+# Load the stdlib-only scraper directly so unit tests do not need to import the
+# Home Assistant integration package (or install Home Assistant in CI).
+SCRAPER_PATH = Path(__file__).resolve().parents[1] / "custom_components" / "ukga" / "scraper.py"
+SPEC = importlib.util.spec_from_file_location("ukga_scraper", SCRAPER_PATH)
+scraper = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(scraper)
+
+PageParser = scraper.PageParser
+_date = scraper._date
+_extract_structured = scraper._extract_structured
+_number52_schedule_fallback = scraper._number52_schedule_fallback
 
 
 def test_date_rejects_invalid_values():
